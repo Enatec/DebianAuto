@@ -1,0 +1,3392 @@
+#!/usr/bin/env bash
+
+###
+# Bootstrap configure of a fresh Debian 12 system after installation.
+# This file is saved as /etc/rc.local and is executed on the first boot.
+#
+# Version:  1.2.0.33
+# Date:     2023/12/15
+# Authors:  Joerg Hochwald @jhochwald (Maintainer)
+#           Chris Pope @Mokkujin (Contributor)
+# Company:  enabling Technology
+# License:  BSD 3-Clause
+###
+
+export DEBIAN_FRONTEND=noninteractive
+
+# Language and locales
+export LANGUAGE=en_US:en
+export LANG=C
+
+###
+# This is the User that was created by the preseeded installation
+AdminUser="enadmin"
+
+# Local Domain, e.g. contoso.com
+LocalDomain="enatec.group"
+
+# The full company name, e.g. Contoso Enterprises LLC
+ComanyName="enabling Technology GmbH"
+
+# The company short name, e.g. contoso
+CompanyShort="enaTec"
+
+# Single IP that is allowed to ping this system
+AllowPingFromIP="10.16.1.1"
+
+# CIDR that is allowed to ping this system (e.g. Management Network)
+AllowPingFromNetwork="10.16.101.0/24"
+
+# Single IP that is not logged in UFW (At least not fully)
+UFWQuietHost="10.16.1.1"
+
+###
+# No need to change anywhing below this line, unless you know what you are doing
+###
+
+# Read the distro information
+if [ -f /etc/os-release ]; then
+   source /etc/os-release
+else
+   echo -e "Error:\t\t/etc/os-release not found"
+   exit 1
+fi
+
+# Here we go
+echo -e "Misc:\t\tStart customizing the ${PRETTY_NAME} installation"
+
+# Set the hostname
+# We use the serial number of the system to generate a unique hostname (only the last 10 characters are used)
+newhostname=$(dmidecode -s system-serial-number | sed 's/[^a-zA-Z0-9]//g' | tail -c 10)
+
+# Now we add a prefix to the hostname
+newhostname="D12-$newhostname"
+echo -e "Misc:\t\tSet the hostname to $newhostname"
+
+hostnamectl set-hostname $newhostname --no-ask-password >/dev/null 2>&1
+hostnamectl hostname $newhostname --no-ask-password >/dev/null 2>&1
+
+echo -e "Misc:\t\tEnsure locale settings"
+localectl set-locale LANG=en_US.UTF-8 >/dev/null 2>&1
+
+root_gid="$(id -g root)"
+if [[ "${root_gid}" -ne 0 ]]; then
+   echo -e "Security:\t\tEnsure that ROOT is UID 0"
+   usermod -g 0 root >/dev/null 2>&1
+fi
+
+echo -e "Cleanup:\t\tRemove the installation report"
+apt-get -y purge installation-report >/dev/null 2>&1
+
+echo -e "Misc:\t\tInstalling base packages via APT"
+BASEPACKAGE_INSTALL="coreutils curl apt-transport-https debsums ca-certificates cracklib-runtime acl sudo libssh2-1 openssh-client openssh-server openssh-sftp-server wget"
+apt-get install ${BASEPACKAGE_INSTALL} -y >/dev/null 2>&1
+
+echo -e "Misc:\t\tUpdate APT"
+apt-get clean -y >/dev/null 2>&1
+apt-get autoremove -y >/dev/null 2>&1
+apt-get update -y >/dev/null 2>&1
+apt-get upgrade -y >/dev/null 2>&1
+apt-get dist-upgrade -y >/dev/null 2>&1
+
+echo -e "Security:\t\tFix the /etc directory permissions"
+chown root:root /etc >/dev/null 2>&1
+chmod 755 /etc >/dev/null 2>&1
+
+echo -e "Misc:\t\tConfigure the default editor"
+update-alternatives --set editor /usr/bin/vim.tiny >/dev/null 2>&1
+
+echo -e "Security:\t\tProtect /home/${AdminUser}"
+chown -R ${AdminUser}:${AdminUser} /home/${AdminUser} >/dev/null 2>&1
+chmod 700 /home/${AdminUser} >/dev/null 2>&1
+
+if [ ! -d "/home/${AdminUser}/.ssh/" ]; then
+   echo -e "Security:\t\tDeploy default SSH authorized_keys for ${AdminUser}"
+   mkdir -p /home/${AdminUser}/.ssh/ >/dev/null 2>&1
+fi
+
+chmod 700 /home/${AdminUser}/.ssh/ >/dev/null 2>&1
+chown ${AdminUser}:${AdminUser} /home/${AdminUser}/.ssh/ >/dev/null 2>&1
+
+cat <<'EOF' >/home/${AdminUser}/.ssh/authorized_keys
+ssh-dss AAAAB3NzaC1kc3MAAACBAK85qlVubIBNqXSBqTaKV8ATouYm2v9t25uyaTq0G/Nkb53yMgogazMTVuSxTy0EaJZK79yUYZDQ7WwEJfsoJhrDKFLn3YTgUbO49yQsQKaxqlVnqh4XVEop0k+9ewXrK6aVpZekECYOXh9PbaChLiFHin9L05g82cw2L0000kVrAAAAFQDxEuNHNDgtpRl0ePYOPs+mYNbJVwAAAIB5YjXl+8iZhWYlA90EwuALOwbs8Y+PkOsyXY/WsYiHxd7XKlQMriSyM8DyRBhcxKRD9Pc5dwzHTOSL+W5A//UJBhWu+ayl1y9UVutAJnTwKddetxoqmrxbtcnvDui49vve0EOrXeheLYR+nZAP1gLrsX9cVHuvMGNoN6iFCffcEQAAAIBmcH6HHMoNvx201kzPYYQP5AUgqwtqLDyk+WtWrnG7No7Sq2IQIMjokjUkNjtFmwOSoGgtHsSyr60zZXVum31tDp+0GIC3imh9RhGM9ATIQjFXSFWjrX+4UGYLL1FEahI+v4asF0/WvSwMtktKXu87TWoY22jX5zTNP+vGPDDY8A== joerg@hochwald.net
+ecdsa-sha2-nistp521 AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHA1MjEAAACFBADp0X7C8gKibNIJz48gnf0BgKjN9nXYbkEetHetUAJKY8Xv7yBgd3S4XGWRWD9XGtImCF0pl27gkwqhc/aCT40/zQCKKYQ5RtHP2PrevlXZsGfZldjXfpJDlH4eI4nCKORf+5/bQjl9xI4k9qFDvl7HibHzZhqqYoam9irOQyTwsXpRkA== joerg@hochwald.net
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO2TT5eKvrxMgaG1UBDf8LP7NuqLUA3zCA7TQcveV9NH joerg@hochwald.net
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDNH4Uq6HFym1YH1+/XrYxQRiYQujIjkAn1jz1Chmca3oz6gC0Ex5n+dxuyK/o5YAVlu0+J24rxyWgpwX7iugR3A4frMpvBRWwrdch6J03QtiOLmRUayD42NuEl4iyI+DqqFfE/XeGfAHAII7hPeGHjgfXI+YntndVsyDgm4tOHZ+zZATp/JykAVg4I9jcRFelGBlTXduHXEjDtUxm2FiR04Ipp+f5U7JucRWM0S6Nr2i8ZCqFHX/nrv1vpCMxu2CH7bmn7GY3h34FWku3tpqRwuCq01iTrz8lVsO8gXxAlIePCOOBa3FqFRRfR/VRdHDJb6i/Fm9i5EbUcrzHquiAvOQoO/rNL9JMLAmAvvmLQtVcO18MbfS3XGGreipC5BYY/f0iVqG6GMBDZxxdJa9Nc00ah0AUikGpYHHKycCqx1HI4dkijiLUWvLGd3wIS5GpRY3Cj72vzyuwHSsEze/nn2lCWR0p/DLIiFGuEFiabvUAR1zEAjHC8e/54/lasiUjYzQV8XzQXqssV1zBWpVzZvIjie5GUltKJMWiU9gqbJPvUl/Nr0vUFBSK0/8lOyN/5RmJMXGq4hFe0uwkQf44iHjbJegzHbmsBXuzvNC7+YSyjAHbVRSqvmRApL+xpZnwEQ1t3zfHUN3ffw5KOY1IIpR5wTFGnhp3Aouax5MNWUQ== joerg@hochwald.net
+EOF
+
+chmod 600 /home/${AdminUser}/.ssh/authorized_keys >/dev/null 2>&1
+chown ${AdminUser}:${AdminUser} /home/${AdminUser}/.ssh/authorized_keys >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure directory permissions are correct"
+# As requested by the AB security team, we need to ensure that the directory permissions are correct
+chmod 755 /bin >/dev/null 2>&1
+chown root:root /bin >/dev/null 2>&1
+
+chmod 755 /boot >/dev/null 2>&1
+chown root:root /boot >/dev/null 2>&1
+
+chmod 755 /dev >/dev/null 2>&1
+chown root:root /dev >/dev/null 2>&1
+
+chmod 755 /etc >/dev/null 2>&1
+chown root:root /etc >/dev/null 2>&1
+
+chmod 755 /home >/dev/null 2>&1
+chown root:root /home >/dev/null 2>&1
+
+chmod 755 /lib >/dev/null 2>&1
+chown root:root /lib >/dev/null 2>&1
+
+chmod 755 /lib64 >/dev/null 2>&1
+chown root:root /lib64 >/dev/null 2>&1
+
+chmod 755 /media >/dev/null 2>&1
+chown root:root /media >/dev/null 2>&1
+
+chmod 755 /mnt >/dev/null 2>&1
+chown root:root /mnt >/dev/null 2>&1
+
+chmod 755 /opt >/dev/null 2>&1
+chown root:root /opt >/dev/null 2>&1
+
+chmod 555 /proc >/dev/null 2>&1
+chown root:root /proc >/dev/null 2>&1
+
+chmod 700 /root >/dev/null 2>&1
+chown root:root /root >/dev/null 2>&1
+
+chmod 755 /run >/dev/null 2>&1
+chown root:root /run >/dev/null 2>&1
+
+chmod 755 /sbin >/dev/null 2>&1
+chown root:root /sbin >/dev/null 2>&1
+
+chmod 755 /srv >/dev/null 2>&1
+chown root:root /srv >/dev/null 2>&1
+
+if [ "$(stat -L -c %a /sys | grep -v "555")" = "" ]; then
+   # Allow sys to be 555 on newer distros
+   chmod 555 /sys >/dev/null 2>&1
+else
+   check_path 755 root root /sys
+   chmod 755 /sys >/dev/null 2>&1
+fi
+chown root:root /sys >/dev/null 2>&1
+
+chmod 1777 /tmp >/dev/null 2>&1
+chown root:root /tmp >/dev/null 2>&1
+
+chmod 755 /usr >/dev/null 2>&1
+chown root:root /usr >/dev/null 2>&1
+
+chmod 755 /var >/dev/null 2>&1
+chown root:root /var >/dev/null 2>&1
+
+chmod 600 /etc/ssh/moduli >/dev/null 2>&1
+chown root:root /etc/ssh/moduli >/dev/null 2>&1
+
+chmod 600 /etc/ssh/ssh_config >/dev/null 2>&1
+chown root:root /etc/ssh/ssh_config >/dev/null 2>&1
+
+chmod 600 /etc/ssh/blacklist.DSA-1024 >/dev/null 2>&1
+chown root:root /etc/ssh/blacklist.DSA-1024 >/dev/null 2>&1
+
+chmod 600 /etc/ssh/blacklist.RSA-2048 >/dev/null 2>&1
+chown root:root /etc/ssh/blacklist.RSA-2048 >/dev/null 2>&1
+
+chmod 600 /etc/ssh/ssh_config >/dev/null 2>&1
+chown root:root /etc/ssh/ssh_config >/dev/null 2>&1
+
+chmod 600 /etc/ssh >/dev/null 2>&1
+chown root:root /etc/ssh >/dev/null 2>&1
+
+chmod 440 /etc/sudoers >/dev/null 2>&1
+chown root:root /etc/sudoers >/dev/null 2>&1
+
+chmod 600 /etc/.pwd.lock >/dev/null 2>&1
+chown root:root /etc/.pwd.lock >/dev/null 2>&1
+
+chmod 600 /etc/gshadow- >/dev/null 2>&1
+chown root:root /etc/gshadow- >/dev/null 2>&1
+
+chmod 600 /etc/group- >/dev/null 2>&1
+chown root:root /etc/group- >/dev/null 2>&1
+
+chmod 600 /etc/shadow- >/dev/null 2>&1
+chown root:root /etc/shadow- >/dev/null 2>&1
+
+chmod 600 /etc/passwd- >/dev/null 2>&1
+chown root:root /etc/passwd- >/dev/null 2>&1
+
+chmod 640 /etc/at.deny >/dev/null 2>&1
+chown root:daemon /etc/at.deny >/dev/null 2>&1
+
+chmod 640 /etc/fuse.conf >/dev/null 2>&1
+chown root:fuse /etc/fuse.conf >/dev/null 2>&1
+
+chmod 640 /etc/shadow >/dev/null 2>&1
+chown root:shadow /etc/shadow >/dev/null 2>&1
+
+chmod 644 /etc/gshadow >/dev/null 2>&1
+chown root:shadow /etc/gshadow >/dev/null 2>&1
+
+chmod 755 /etc/rmt >/dev/null 2>&1
+chown root:root /etc/rmt >/dev/null 2>&1
+
+chmod 755 /etc/rc.local >/dev/null 2>&1
+chown root:root /etc/rc.local >/dev/null 2>&1
+
+chmod 755 /etc/ha.d >/dev/null 2>&1
+chown root:root /etc/ha.d >/dev/null 2>&1
+
+if [ -e /etc/ha.d/authkeys ]; then
+   chmod 600 /etc/ha.d/authkeys >/dev/null 2>&1
+   chown root:root /etc/ha.d/authkeys >/dev/null 2>&1
+fi
+
+if [ -e /etc/drbd.conf ]; then
+   chmod 600 /etc/drbd.conf >/dev/null 2>&1
+   chown root:root /etc/drbd.conf >/dev/null 2>&1
+   # Check that drbd.conf contains shared-secret keys, otherwise there is no protection against malicious external DRBD packets
+   # There is no protection against malicious external DRBD packets which may cause data corruption on your DRBD disks.
+   # Ensure that every disk is configured with a shared-secret attribute.
+   if [ "$(grep shared-secret /etc/drbd.conf)" = "" ]; then
+      echo -e "Warning:\t\tNo shared-secret configured in /etc/drbd.conf."
+   fi
+fi
+
+###
+# Adopted from the old security
+# With many contributions by @Mokkujin and @jhochwald (thanks!)
+###
+echo -e "Security:\t\tDisable some services"
+NET="dccp sctp rds tipc"
+
+for disable in ${NET}; do
+   if ! grep -q "${disable}" /etc/modprobe.d/disablenet.conf 2>/dev/null; then
+      echo "install ${disable} /bin/true" >>/etc/modprobe.d/disablenet.conf
+   fi
+done
+
+echo -e "Security:\t\tDisable misc file systems"
+FS="cramfs freevxfs jffs2 hfs hfsplus squashfs udf vfat"
+
+for disable in ${FS}; do
+   if ! grep -q "${disable}" /etc/modprobe.d/disablefs.conf 2>/dev/null; then
+      echo "install ${disable} /bin/true" >>/etc/modprobe.d/disablefs.conf
+   fi
+done
+
+if [ -f /etc/systemd/system.conf ]; then
+   echo -e "Security:\t\tModify /etc/systemd/system.conf"
+   sed -i 's/^#DumpCore=.*/DumpCore=no/' /etc/systemd/system.conf
+   sed -i 's/^#CrashShell=.*/CrashShell=no/' /etc/systemd/system.conf
+   sed -i 's/^#DefaultLimitCORE=.*/DefaultLimitCORE=0/' /etc/systemd/system.conf
+   sed -i 's/^#DefaultLimitNOFILE=.*/DefaultLimitNOFILE=1024/' /etc/systemd/system.conf
+   sed -i 's/^#DefaultLimitNPROC=.*/DefaultLimitNPROC=1024/' /etc/systemd/system.conf
+fi
+
+if [ -f /etc/systemd/user.conf ]; then
+   echo -e "Security:\t\tModify /etc/systemd/user.conf"
+   sed -i 's/^#DefaultLimitCORE=.*/DefaultLimitCORE=0/' /etc/systemd/user.conf
+   sed -i 's/^#DefaultLimitNOFILE=.*/DefaultLimitNOFILE=1024/' /etc/systemd/user.conf
+   sed -i 's/^#DefaultLimitNPROC=.*/DefaultLimitNPROC=1024/' /etc/systemd/user.conf
+fi
+
+echo -e "Misc:\t\tModify /etc/fstab and /etc/systemd/system/tmp.mount"
+
+cat <<'EOF' >/etc/systemd/system/tmp.mount
+[Unit]
+Description=Temporary Directory
+Documentation=man:hier(7)
+Before=local-fs.target
+
+[Mount]
+What=tmpfs
+Where=/tmp
+Type=tmpfs
+Options=mode=1777,strictatime,noexec,nosuid,nodev
+EOF
+
+TMPFSTAB=$(mktemp --tmpdir fstab.XXXXX)
+
+sed -i '/floppy/d' /etc/fstab
+
+grep -v -E '[[:space:]]/boot[[:space:]]|[[:space:]]/home[[:space:]]|[[:space:]]/var/log[[:space:]]|[[:space:]]/var/log/audit[[:space:]]|[[:space:]]/var/tmp[[:space:]]' /etc/fstab >"${TMPFSTAB}"
+
+if grep -q '[[:space:]]/boot[[:space:]].*defaults[[:space:]]0 0$' /etc/fstab; then
+   grep '[[:space:]]/boot[[:space:]].*defaults[[:space:]]0 0$' /etc/fstab | sed 's/defaults/defaults,nosuid,nodev/g' >>"${TMPFSTAB}"
+fi
+
+if grep -q '[[:space:]]/home[[:space:]].*defaults[[:space:]]0 0$' /etc/fstab; then
+   grep '[[:space:]]/home[[:space:]].*defaults[[:space:]]0 0$' /etc/fstab | sed 's/defaults/defaults,nosuid,nodev/g' >>"${TMPFSTAB}"
+fi
+
+if grep -q '[[:space:]]/var/log[[:space:]].*defaults[[:space:]]0 0$' /etc/fstab; then
+   grep '[[:space:]]/var/log[[:space:]].*defaults[[:space:]]0 0$' /etc/fstab | sed 's/defaults/defaults,nosuid,nodev,noexec/g' >>"${TMPFSTAB}"
+fi
+
+if grep -q '[[:space:]]/var/log/audit[[:space:]].*defaults[[:space:]]0 0$' /etc/fstab; then
+   grep '[[:space:]]/var/log/audit[[:space:]].*defaults[[:space:]]0 0$' /etc/fstab | sed 's/defaults/defaults,nosuid,nodev,noexec/g' >>"${TMPFSTAB}"
+fi
+
+if grep -q '[[:space:]]/var/tmp[[:space:]].*defaults[[:space:]]0 0$' /etc/fstab; then
+   grep '[[:space:]]/var/tmp[[:space:]].*defaults[[:space:]]0 0$' /etc/fstab | sed 's/defaults/defaults,nosuid,nodev,noexec/g' >>"${TMPFSTAB}"
+fi
+
+cp "${TMPFSTAB}" /etc/fstab >/dev/null
+
+if ! grep -q '/run/shm ' /etc/fstab; then
+   echo 'none /run/shm tmpfs rw,noexec,nosuid,nodev 0 0' >>/etc/fstab
+fi
+
+if ! grep -q '/dev/shm ' /etc/fstab; then
+   echo 'none /dev/shm tmpfs rw,noexec,nosuid,nodev 0 0' >>/etc/fstab
+fi
+
+if ! grep -q '/proc ' /etc/fstab; then
+   echo 'none /proc proc rw,nosuid,nodev,noexec,relatime,hidepid=2 0 0' >>/etc/fstab
+fi
+
+if [ -e /etc/systemd/system/tmp.mount ]; then
+   sed -i '/^\/tmp/d' /etc/fstab
+
+   for t in $(mount | grep "[[:space:]]/tmp[[:space:]]" | awk '{print $3}'); do
+      umount "${t}"
+   done
+
+   sed -i '/[[:space:]]\/tmp[[:space:]]/d' /etc/fstab
+
+   if [ ! -d "/etc/systemd/system/default.target.wants/" ]; then
+      mkdir -p /etc/systemd/system/default.target.wants/ >/dev/null 2>&1
+   fi
+
+   ln -s /etc/systemd/system/tmp.mount /etc/systemd/system/default.target.wants/tmp.mount >/dev/null 2>&1
+   sed -i 's/Options=.*/Options=mode=1777,strictatime,noexec,nodev,nosuid/' /etc/systemd/system/tmp.mount
+
+   chmod 0644 /etc/systemd/system/tmp.mount >/dev/null 2>&1
+fi
+
+# Checking swap on small instances
+if [ -z "$(swapon -s)" ] && [ $memory -lt 1000000 ]; then
+   echo -e "Mitigate:\t\tSwap on small instances"
+   fallocate -l 1G /swapfile >/dev/null 2>&1
+   chmod 600 /swapfile >/dev/null 2>&1
+   mkswap /swapfile >/dev/null 2>&1
+   swapon /swapfile >/dev/null 2>&1
+   echo "/swapfile   none    swap    sw    0   0" >>/etc/fstab
+fi
+
+# Workaround until reboot: Mount a RAMDISK
+mount -t tmpfs -o size=1024m myramdisk /tmp >/dev/null 2>&1
+
+chown root:root /etc/fstab >/dev/null 2>&1
+chmod 644 /etc/fstab >/dev/null 2>&1
+
+echo -e "Security:\t\tDisable daemon autostart"
+# Disable daemon autostart /usr/share/doc/sysv-rc/README.policy-rc.d.gz
+echo -e '#!/bin/sh \nexit 101' >/usr/sbin/policy-rc.d
+chmod a+x /usr/sbin/policy-rc.d >/dev/null 2>&1
+chown root:root /usr/sbin/policy-rc.d >/dev/null 2>&1
+
+echo -e "Security:\t\tRegister /sbin/nologin and /usr/sbin/nologin"
+echo "/sbin/nologin" >>/etc/shells
+echo "/usr/sbin/nologin" >>/etc/shells
+
+echo -e "Security:\t\tDisable prelinking via /etc/sysconfig/prelink"
+if [ ! -d "/etc/sysconfig/" ]; then
+   mkdir -p /etc/sysconfig/ >/dev/null 2>&1
+fi
+
+touch /etc/sysconfig/prelink >/dev/null 2>&1
+
+if grep -q "^PRELINKING" /etc/sysconfig/prelink 2>/dev/null; then
+   sed -i 's/PRELINKING.*/PRELINKING=no/g' /etc/sysconfig/prelink
+else
+   echo -e "\n# Set PRELINKING=no per security requirements" >>/etc/sysconfig/prelink
+   echo -e "PRELINKING=no" >>/etc/sysconfig/prelink
+fi
+
+if dpkg -l | grep prelink 1>/dev/null; then
+   "$(command -v prelink)" -ua 2>/dev/null
+   apt-get purge prelink -y >/dev/null 2>&1
+fi
+
+echo -e "Security:\t\tEnsure unwanted services are not enabled"
+for i in chargen-dgram chargen-stream daytime-dgram daytime-stream discard-dgram discard-stream echo-dgram echo-stream time-dgram time-stream; do
+   systemctl disable ${i} >/dev/null 2>&1
+   systemctl mask ${i} >/dev/null 2>&1
+done
+
+for i in tftp certmonger cgconfig cgred cpuspeed kdump mdmonitor messagebus netconsole ntpdate oddjobd portreserve qpidd quota_nld rdisc rhnsd rhsmcertd saslauthd smartd sysstat atd nfslock named httpd dovecot squid snmpd rpcgssd rpcsvcgssd rpcidmapd netfs nfs; do
+   systemctl disable ${i} >/dev/null 2>&1
+   systemctl mask ${i} >/dev/null 2>&1
+done
+
+for i in avahi-daemon cups dhcpd slapd nfs rpcbind named bind vsftpd httpd dovecot smb squid snmpd ypserv rsh.socket rsh rlogin.socket rlogin rexec.socket rexec telnet.socket tftp.socket rsyncd ntalk ypbind; do
+   systemctl disable ${i} >/dev/null 2>&1
+   systemctl mask ${i} >/dev/null 2>&1
+done
+
+echo -e "Security:\t\tRemoving unused packages"
+apt-get clean -y >/dev/null 2>&1
+apt-get autoremove -y >/dev/null 2>&1
+
+deb_clean=$(dpkg -l | grep '^rc' | awk '{print $2}')
+
+if ${deb_clean}; then
+   apt-get purge ${deb_clean} -y >/dev/null 2>&1
+fi
+
+echo -e "Security:\t\tConfigure /etc/hosts.allow"
+
+echo "sshd : ALL : ALLOW" >/etc/hosts.allow
+echo "ALL: LOCAL, 127.0.0.1" >>/etc/hosts.allow
+chown root:root /etc/hosts.allow >/dev/null 2>&1
+chmod 400 /etc/hosts.allow >/dev/null 2>&1
+
+echo -e "Security:\t\tConfigure /etc/hosts.deny"
+echo "ALL: ALL" >/etc/hosts.deny
+chmod 644 /etc/hosts.deny >/dev/null 2>&1
+
+echo -e "Security:\t\tConfigure /etc/login.defs"
+sed -i 's/^.*LOG_OK_LOGINS.*/LOG_OK_LOGINS yes/' /etc/login.defs
+sed -i 's/^UMASK.*/UMASK 077/' /etc/login.defs
+sed -i 's/^PASS_MIN_DAYS.*/PASS_MIN_DAYS 1/' /etc/login.defs
+sed -i 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS 60/' /etc/login.defs
+sed -i 's/DEFAULT_HOME.*/DEFAULT_HOME no/' /etc/login.defs
+sed -i 's/ENCRYPT_METHOD.*/ENCRYPT_METHOD SHA512/' /etc/login.defs
+sed -i 's/USERGROUPS_ENAB.*/USERGROUPS_ENAB no/' /etc/login.defs
+sed -i 's/^# SHA_CRYPT_MIN_ROUNDS.*/SHA_CRYPT_MIN_ROUNDS 10000/' /etc/login.defs
+sed -i 's/^# SHA_CRYPT_MAX_ROUNDS.*/SHA_CRYPT_MAX_ROUNDS 65536/' /etc/login.defs
+
+echo -e "Security:\t\tConfigure /etc/sysctl.d/99_general_dsb.conf"
+cat <<EOF >/etc/sysctl.d/99_general_dsb.conf
+################################################################################
+# Default System Tweaks
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+EOF
+cat <<'EOF' >>/etc/sysctl.d/99_general_dsb.conf
+# Disable core dumps for SUID programs
+fs.suid_dumpable = 0
+
+# Check / Enable ASLR
+kernel.randomize_va_space = 2
+
+# Memory overcommit settings to prevent the Out Of Memory (OOM) killer from killing random processes
+vm.overcommit_memory = 2
+vm.overcommit_ratio = 100
+
+#
+kernel.sysrq = 0
+kernel.shmall = 4194304
+kernel.msgmnb = 65536
+kernel.msgmax = 65536
+
+# Increase size of file handles and inode cache
+fs.file-max = 2097152
+
+# Do less swapping
+vm.swappiness = 10
+vm.dirty_ratio = 10
+vm.dirty_background_ratio = 5
+
+# Default Socket Receive Buffer
+net.core.rmem_default = 31457280
+
+# Maximum Socket Receive Buffer
+net.core.rmem_max = 12582912
+
+# Default Socket Send Buffer
+net.core.wmem_default = 31457280
+
+# Maximum Socket Send Buffer
+net.core.wmem_max = 12582912
+
+# Increase number of incoming connections
+net.core.somaxconn = 4096
+
+# Increase number of incoming connections backlog
+net.core.netdev_max_backlog = 65536
+
+# Increase the maximum amount of option memory buffers
+net.core.optmem_max = 25165824
+
+# Increase the maximum total buffer-space allocatable
+# This is measured in units of pages (4096 bytes)
+net.ipv4.tcp_mem = 65536 131072 262144
+net.ipv4.udp_mem = 65536 131072 262144
+
+# Increase the read-buffer space allocatable
+net.ipv4.tcp_rmem = 8192 87380 16777216
+net.ipv4.udp_rmem_min = 16384
+
+# Increase the write-buffer-space allocatable
+net.ipv4.tcp_wmem = 8192 65536 16777216
+net.ipv4.udp_wmem_min = 16384
+
+# Disable TCP SACK (TCP Selective Acknowledgement),
+# DSACK (duplicate TCP SACK), and FACK (Forward Acknowledgement)
+net.ipv4.tcp_sack = 0
+net.ipv4.tcp_dsack = 0
+net.ipv4.tcp_fack = 0
+
+# Disable the gradual speed increase that's useful
+# on variable-speed WANs but not for us
+net.ipv4.tcp_slow_start_after_idle = 0
+
+net.ipv4.tcp_timestamps = 0
+net.ipv4.tcp_window_scaling = 1
+
+# Decrease the time default value for connections to keep alive
+net.ipv4.tcp_keepalive_time = 120
+
+# Decrease the time default value for tcp_fin_timeout connection
+# (default: 60 seconds, recommended 15-30 seconds)
+net.ipv4.tcp_fin_timeout = 15
+
+# This determines the wait time between isAlive interval probes. To set:
+# (default: 75 seconds, recommended: 15-30 seconds)
+net.ipv4.tcp_keepalive_intvl = 30
+
+# This determines the number of probes before timing out.
+# (default: 9, recommended 5)
+net.ipv4.tcp_keepalive_probes = 3
+
+# Increase the tcp-time-wait buckets pool size to prevent simple DOS attacks
+net.ipv4.tcp_max_tw_buckets = 1440000
+
+# This allows reusing sockets in TIME_WAIT state for new connections when it is safe from protocol viewpoint.
+# Default value is 0 (disabled).
+net.ipv4.tcp_tw_reuse = 1
+
+# SYN Flood Protection
+# These settings added to sysctl.conf will make a server more resistant to SYN flood attacks.
+# Applying configures the kernel to use the SYN cookies mechanism, with a backlog queue of 1024 connections,
+# also setting the SYN and SYN/ACK retries to an effective ceiling of about 45 seconds.
+# The defaults for these settings vary depending on kernel version and distribution you may want to check them with sysctl -a | grep syn
+net.ipv4.tcp_max_syn_backlog = 1024
+net.ipv4.tcp_syn_retries = 2
+net.ipv4.tcp_synack_retries = 2
+
+# Allowed local port range
+net.ipv4.ip_local_port_range = 1024 65000
+
+# Protect Against TCP Time-Wait
+net.ipv4.tcp_rfc1337 = 1
+
+# Avoid a smurf attack
+net.ipv4.icmp_echo_ignore_broadcasts = 1
+
+# Turn on protection for bad icmp error messages
+net.ipv4.icmp_ignore_bogus_error_responses = 1
+
+# Turn on syncookies for SYN flood attack protection
+net.ipv4.tcp_syncookies = 1
+
+# Turn on and log spoofed, source routed, and redirect packets
+net.ipv4.conf.all.log_martians = 1
+net.ipv4.conf.default.log_martians = 1
+
+# No source routed packets here
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.conf.default.accept_source_route = 0
+
+# Turn on reverse path filtering
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+
+# Make sure no one can alter the routing tables
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv4.conf.all.secure_redirects = 0
+net.ipv4.conf.default.secure_redirects = 0
+
+# Don't act as a router
+net.ipv4.ip_forward = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+
+# Congestion control algorithm to be used for new connections bbr to replace cubic ;-)
+# https://blog.cloudflare.com/http-2-prioritization-with-nginx/
+net.ipv4.tcp_congestion_control = bbr
+net.core.default_qdisc = fq
+net.ipv4.tcp_notsent_lowat = 16384
+
+# TCP will not cache metrics on closing connections (in route cache)
+# reused to set initial conditions for new connections
+net.ipv4.tcp_no_metrics_save = 1
+
+# TCP Fast Open enabled by default in 3.13+
+net.ipv4.tcp_fastopen = 1
+
+# Maximal number of TCP sockets not attached to any user file handle, held by system.
+net.ipv4.tcp_max_orphans = 60000
+
+# NEW
+net.ipv4.route.flush = 1
+vm.vfs_cache_pressure = 70
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.tcp_abort_on_overflow = 1
+
+# Avoid kernel memory address exposures via dmesg
+kernel.dmesg_restrict = 1
+
+# Prevent creating hardlinks and symbolic links
+fs.protected_hardlinks = 1
+fs.protected_symlinks = 1
+
+# IPv6 related (See above)
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.all.accept_source_route = 0
+net.ipv6.conf.default.accept_redirects = 0
+net.ipv6.conf.default.accept_source_route = 0
+EOF
+
+sed -i '/net.ipv6.conf.eth0.accept_ra_rtr_pref/d' /etc/sysctl.d/99_general_dsb.conf
+ARPBIN="$(command -v arp)"
+
+if [ $? -eq 0 ]; then
+   for n in $(${ARPBIN} -n -a | awk '{print $NF}' | sort | uniq); do
+      echo "net.ipv6.conf.${n}.accept_ra_rtr_pref = 0" >>/etc/sysctl.d/99_general_dsb.conf
+   done
+
+   chmod 0600 /etc/sysctl.d/99_general_dsb.conf >/dev/null 2>&1
+fi
+
+echo -e "Security:\t\tConfigure /etc/default/useradd"
+sed -i 's/DIR_MODE=.*/DIR_MODE=0750/' /etc/default/useradd
+sed -i 's/DSHELL=.*/DSHELL=\/bin\/false/' /etc/default/useradd
+sed -i 's/USERGROUPS=.*/USERGROUPS=yes/' /etc/default/useradd
+
+echo -e "Security:\t\tConfigure /etc/adduser.conf"
+sed -i 's/SHELL=.*/SHELL=\/bin\/false/' /etc/adduser.conf
+sed -i 's/^# INACTIVE=.*/INACTIVE=30/' /etc/adduser.conf
+
+awk -F ':' '{if($3 >= 1000 && $3 <= 65000) print $6}' /etc/passwd | while read -r userhome; do
+   chmod 0750 "${userhome}" >/dev/null 2>&1
+done
+
+echo -e "Security:\t\tRestricting Root login to CONSOLE and TTY1"
+cat <<'EOF' >/etc/securetty
+console
+tty1
+EOF
+
+echo -e "Security:\t\tProtect /root"
+chmod 700 /root >/dev/null 2>&1
+
+echo -e "Security:\t\tMask debug-shell"
+systemctl mask debug-shell.service >/dev/null 2>&1
+systemctl stop debug-shell.service >/dev/null 2>&1
+
+echo -e "Security:\t\tRestrict access to su to root only"
+echo -e "Security:\t\tCreate the group wheel with root privileges"
+addgroup --system wheel >/dev/null 2>&1
+
+echo -e "Security:\t\tAdd the default admin account"
+usermod -a -G wheel root >/dev/null 2>&1
+usermod -a -G wheel ${AdminUser} >/dev/null 2>&1
+
+echo -e "Security:\t\tTweak /etc/pam.d/su file"
+echo "auth      required pam_wheel.so" >>/etc/pam.d/su
+
+echo "# Disable all other uses of su" >>/etc/pam.d/su
+echo "auth      requisite  pam_deny.so" >>/etc/pam.d/su
+
+echo -e "Security:\t\tCreate a new group to allow su"
+groupadd suusers >/dev/null 2>&1
+
+echo -e "Security:\t\tAdd the default admin account"
+usermod -a -G suusers root >/dev/null 2>&1
+usermod -a -G suusers ${AdminUser} >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure /bin/su is more secure"
+dpkg-statoverride --remove /bin/su >/dev/null 2>&1
+dpkg-statoverride --update --add root suusers 4750 /bin/su >/dev/null 2>&1
+
+echo -e "Security:\t\tPackage removal"
+PACKAGE_REMOVE="apport* autofs avahi* beep git pastebinit popularity-contest rsh* rsync talk* telnet* tftp* whoopsie xinetd yp-tools ypbind"
+apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+
+echo -e "Security:\t\tMore Secure Random Entropy Pool (WIP) - Install rng-tools"
+apt-get install rng-tools -y >/dev/null
+
+echo -e "Security:\t\tSet the hardware device used to generate random numbers"
+echo "HRNGDEVICE=/dev/urandom" >>/etc/default/rng-tools
+
+echo -e "Security:\t\tGenerate a random root password"
+# We use shuf to generate a complex random password in this case
+ROOT_PASSWORD=$(
+   LC_ALL=C
+   shuf -r -n1 -e {a..z} {A..Z} | tr -d $'\n'
+   {
+      shuf -r -n8 -e {0..9}
+      shuf -r -n8 -e {a..z}
+      shuf -r -n8 -e {A..Z}
+      shuf -r -n7 -e { \! \" \# $ % \& '\' '/' \( \) \{ \} [ ] \< \> + - = . , : \; ? @ \| \` \~ ^ _ "'" \* }
+   } | shuf | tr -d $'\n'
+)
+# Another option might be this: https://unix.stackexchange.com/a/722319
+# We use /dev/urandom to generate a random password in this case
+#ROOT_PASSWORD=$(LC_ALL=C tr -dc '0-9%+\/!#$^?:.(){}[]-_.A-Z-a-z' </dev/urandom | head -c 32)
+echo -e "Security:\t\tSet the root password to a random value"
+# we use SHA512 to hash the password, should be the default but we set it anyway
+echo "root:${ROOT_PASSWORD}" | chpasswd -c SHA512 -s 200000 >/dev/null 2>&1
+
+# Ensure the root account is locked but can still run cron jobs.
+passwd -dl root >/dev/null 2>&1
+chage -E-1 root >/dev/null 2>&1
+
+echo -e "Misc:\t\tConfigure /etc/hosts"
+cat <<EOF >/etc/hosts
+################################################################################
+# Default hosts files
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+
+###
+# Default entries
+###
+127.0.0.1         localhost
+127.0.0.1         localhost.localdomain
+127.0.0.1         local
+
+255.255.255.255   broadcasthost
+
+::1               localhost
+::1               ip6-localhost
+::1               ip6-loopback
+
+fe80::1%lo0       localhost
+
+ff00::0           ip6-localnet
+ff00::0           ip6-mcastprefix
+ff02::1           ip6-allnodes
+ff02::2           ip6-allrouters
+ff02::3           ip6-allhosts
+
+0.0.0.0           0.0.0.0
+
+0.0.0.0           wpad
+0.0.0.0           wpad.
+0.0.0.0           wpad.${LocalDomain}
+
+################################################################################
+
+EOF
+chown root:root /etc/hosts >/dev/null 2>&1
+chmod 640 /etc/hosts >/dev/null 2>&1
+
+echo -e "Misc:\t\tConfigure /etc/apt/apt.conf.d/20-dsb-auto-upgrades"
+cat <<EOF >/etc/apt/apt.conf.d/20-dsb-auto-upgrades
+################################################################################
+# Default /etc/apt/apt.conf.d/20-dsb-auto-upgrades
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+#
+# See: https://wiki.debian.org/UnattendedUpgrades
+################################################################################
+EOF
+cat <<'EOF' >>/etc/apt/apt.conf.d/20-dsb-auto-upgrades
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "7";
+EOF
+
+echo -e "Misc:\t\tConfigure /etc/apt/apt.conf.d/51-dsb-unattended-upgrades"
+cat <<EOF >/etc/apt/apt.conf.d/51-dsb-unattended-upgrades
+################################################################################
+# Default /etc/apt/apt.conf.d/51-dsb-unattended-upgrades
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+#
+# See: https://wiki.debian.org/UnattendedUpgrades
+################################################################################
+EOF
+cat <<'EOF' >>/etc/apt/apt.conf.d/51-dsb-unattended-upgrades
+// Enable the update/upgrade script (0=disable)
+APT::Periodic::Enable "1";
+
+// Do "apt-get update" automatically every n-days (0=disable)
+APT::Periodic::Update-Package-Lists "1";
+
+// Do "apt-get upgrade --download-only" every n-days (0=disable)
+APT::Periodic::Download-Upgradeable-Packages "1";
+
+// Do "apt-get autoclean" every n-days (0=disable)
+APT::Periodic::AutocleanInterval "7";
+
+// Send report mail to root
+//     0:  no report             (or null string)
+//     1:  progress report       (actually any string)
+//     2:  + command outputs     (remove -qq, remove 2>/dev/null, add -d)
+//     3:  + trace on    APT::Periodic::Verbose "2";
+APT::Periodic::Unattended-Upgrade "1";
+
+// Automatically upgrade packages from these
+Unattended-Upgrade::Origins-Pattern {
+      "o=Debian,a=stable";
+      "o=Debian,a=stable-updates";
+      "origin=Debian,codename=\${VERSION_CODENAME},label=Debian-Security";
+};
+
+// You can specify your own packages to NOT automatically upgrade here
+Unattended-Upgrade::Package-Blacklist {
+};
+
+// Run dpkg --force-confold --configure -a if a unclean dpkg state is detected to true to ensure that updates get installed even when the system got interrupted during a previous run
+Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+
+//Perform the upgrade when the machine is running because we wont be shutting our server down often
+Unattended-Upgrade::InstallOnShutdown "false";
+
+// Send an email to this address with information about the packages upgraded.
+Unattended-Upgrade::Mail "root";
+
+// Always send an e-mail
+Unattended-Upgrade::MailOnlyOnError "false";
+
+// Remove all unused dependencies after the upgrade has finished
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+
+// Remove any new unused dependencies after the upgrade has finished
+Unattended-Upgrade::Remove-New-Unused-Dependencies "true";
+
+// Automatically reboot WITHOUT CONFIRMATION if the file /var/run/reboot-required is found after the upgrade.
+Unattended-Upgrade::Automatic-Reboot "true";
+
+// Automatically reboot even if users are logged in.
+Unattended-Upgrade::Automatic-Reboot-WithUsers "true";
+EOF
+
+echo -e "Security:\t\tMofify SSH Server"
+echo -e "Security:\t\tCreate a new group to allow SSH access"
+groupadd sshusers >/dev/null 2>&1
+
+echo -e "Security:\t\tAdd the default admin account"
+usermod -a -G sshusers ${AdminUser} >/dev/null 2>&1
+
+echo -e "Security:\t\tTweak the SSH Server configiuration"
+cat <<EOF >/etc/ssh/sshd_config.d/${CompanyShort}.conf
+################################################################################
+# Default SSH Daemon config
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+
+# No ROOT User login
+PermitRootLogin no
+
+# Limit the maximum number of authentication attempts for a particular login session
+MaxAuthTries 5
+
+# Reduced login grace period, which is the amount of time a user has to complete authentication after initially connecting
+LoginGraceTime 90
+
+# Disable password based login
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+#RSAAuthentication yes
+
+# Disable SSH password authentication
+PasswordAuthentication no
+
+# Disable X11 forwarding
+X11Forwarding no
+X11UseLocalhost yes
+
+# Do not allow connecting clients to pass custom environment variables
+PermitUserEnvironment no
+
+# Disable several miscellaneous options related to tunneling and forwarding
+AllowAgentForwarding no
+AllowTcpForwarding no
+PermitTunnel no
+
+#
+UseDNS no
+
+# Public key authentication first
+ChallengeResponseAuthentication no
+KerberosAuthentication no
+GSSAPIAuthentication no
+
+# Limit ssh access to only ${AdminUser} user
+AllowUsers ${AdminUser}
+
+# Do not allow the root user to login via SSH
+DenyUsers root
+
+# do not allow the root user group to login via SSH
+DenyGroups root
+
+# Limit Users ssh access
+PermitEmptyPasswords no
+
+# Disable the verbose SSH banner that is enabled by default
+DebianBanner no
+
+# Enable a warning banner for ssh users
+Banner none
+
+# Disable .rhosts files (verification)
+IgnoreRhosts yes
+
+# Disable host-based authentication (verification)
+HostbasedAuthentication no
+
+# Specifies the available KEX (Key Exchange) algorithms.
+KexAlgorithms curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256
+
+# Specifies the ciphers allowed
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
+
+#Specifies the available MAC (message authentication code) algorithms
+MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-512,hmac-sha2-256,umac-128@openssh.com
+
+# LogLevel VERBOSE logs user's key fingerprint on login. Needed to have a clear audit track of which key was using to log in.
+LogLevel VERBOSE
+
+ClientAliveCountMax 3
+ClientAliveInterval 600
+GatewayPorts no
+GSSAPICleanupCredentials yes
+IgnoreUserKnownHosts yes
+KerberosOrLocalPasswd no
+KerberosTicketCleanup yes
+MaxSessions 10
+MaxStartups 10:30:60
+PrintLastLog no
+PrintMotd no
+StrictModes yes
+SyslogFacility AUTHPRIV
+KbdInteractiveAuthentication no
+Compression delayed
+UsePAM yes
+
+# Allow client to pass locale environment variables
+AcceptEnv LANG LC_*
+EOF
+
+chown root:root /etc/ssh/sshd_config >/dev/null 2>&1
+chmod 0600 /etc/ssh/sshd_config >/dev/null 2>&1
+
+echo -e "Security:\t\tRemove Short Diffie-Hellman Keys"
+echo -e "Security:\t\tSave the existing SSH's moduli file"
+
+echo -e "Security:\t\tRemove short modul"
+awk '$5 >= 3071' /etc/ssh/moduli >/etc/ssh/moduli.tmp
+mv /etc/ssh/moduli.tmp /etc/ssh/moduli >/dev/null
+
+echo -e "Security:\t\tConfigure /etc/cron and /etc/at"
+rm -rf /etc/cron.deny >/dev/null 2>&1
+rm -rf /etc/at.deny >/dev/null 2>&1
+echo 'root' >/etc/cron.allow
+echo 'root' >/etc/at.allow
+chown root:root /etc/cron* >/dev/null 2>&1
+chmod og-rwx /etc/cron* >/dev/null 2>&1
+chown root:root /etc/at* >/dev/null 2>&1
+chmod og-rwx /etc/at* >/dev/null 2>&1
+
+systemctl mask atd.service >/dev/null 2>&1
+systemctl stop atd.service >/dev/null 2>&1
+
+if [ -f /etc/rsyslog.d/50-default.conf ]; then
+   sed -i 's/^#cron./cron./' /etc/rsyslog.d/50-default.conf
+fi
+
+echo -e "Security:\t\tConfigure Ctrl-alt-delete"
+systemctl mask ctrl-alt-del.target >/dev/null 2>&1
+
+sed -i 's/^#CtrlAltDelBurstAction=.*/CtrlAltDelBurstAction=none/' /etc/systemd/system.conf
+
+echo -e "Security:\t\tEnsure permissions on all log files are configured"
+find /var/log -type f -exec /bin/chmod g-wx,o-rwx {} + >/dev/null 2>&1
+
+echo -e "Security:\t\tConfigure .rhosts and hosts.equiv abuse"
+while read -r hostpasswd; do
+   find "${hostpasswd}" \( -name "hosts.equiv" -o -name ".rhosts" \) -exec rm -f {} \; 2>/dev/null
+done <<<"$(awk -F ":" '{print $6}' /etc/passwd)"
+
+if [[ -f /etc/hosts.equiv ]]; then
+   rm -f /etc/hosts.equiv >/dev/null
+fi
+
+echo -e "Security:\t\tRemove users"
+for users in games gnats irc list news sync uucp; do
+   userdel -r "${users}" 2>/dev/null
+done
+
+echo -e "Security:\t\tRemove suid bits"
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games"
+SUID_LIST="apt apt-get ar aria2c arp ash at atobm awk base32 base64 basenc bash bpftrace bridge bsd-write bundler busctl busybox byebug cancel capsh cat chage check_by_ssh check_cups check_log check_memory check_raid check_ssl_cert check_statusfile chfn chmod chown chroot chsh cobc column comm composer cowsay cowthink cp cpan cpulimit crash crontab csh csplit cupsfilter curl cut dash date dd dialog diff dig dmesg dmsetup dnf docker dpkg easy_install eb ed emacs env eqn ex exiftool expand expect facter file find finger flock fmt fold ftp fusermount gawk gcc gdb gem genisoimage ghc ghci gimp git grep gtester hd head hexdump highlight hping3 iconv iftop install ionice ip irb jjs join journalctl jq jrunscript ksh ksshell ld.so ldconfig less logsave look ltrace lua lwp-download lwp-request mail make man mawk mlocate more mount mount.nfs mtr mv mysql nano nawk nc newgrp nice nl nmap node nohup npm nroff nsenter ntfs-3g od openssl openvt paste pdb perl pg php pic pico ping ping6 pip pkexec pppd pr pry psql puppet python rake readelf red redcarpet restic rev rlogin rlwrap rpm rpmquery rsync ruby run-mailcap run-parts rview rvim scp screen script sed service setarch sftp sh shuf slsh smbclient socat soelim sort split sqlite3 ss ssh ssh-keyscan start-stop-daemon stdbuf strace strings su sysctl systemctl tac tail tar taskset tbl tclsh tcpdump tcsh tee telnet tftp time timeout tmux top traceroute6.iputils troff ul umount unexpand uniq unshare update-alternatives uudecode uuencode valgrind vi view vim wall watch wget whois wish write xargs xmodmap xxd xz yelp yum zip zsh zsoelim zypper"
+
+for suid in ${SUID_LIST}; do
+   file=$(command -v "${suid}")
+   if [ -x "${file}" ]; then
+      chmod -s "${file}" >/dev/null 2>&1
+      oct=$(stat -c "%A" "${file}" | sed 's/s/x/g')
+      ug=$(stat -c "%U %G" "${file}")
+      dpkg-statoverride --remove "${file}" >/dev/null 2>&1
+      dpkg-statoverride --add "${ug}" "${oct}" "${file}" >/dev/null 2>&1
+   fi
+done
+
+while read -r suidshells; do
+   if [ -x "${suidshells}" ]; then
+      chmod -s "${suidshells}" >/dev/null 2>&1
+   fi
+done <<<"$(grep -v '^#' /etc/shells)"
+
+echo -e "Security:\t\tConfigure umask"
+if [ -f /etc/init.d/rc ]; then
+   sed -i 's/umask 022/umask 077/g' /etc/init.d/rc
+fi
+
+if ! grep -q -i "umask" "/etc/profile" 2>/dev/null; then
+   echo "" >>/etc/profile
+   echo "umask 077" >>/etc/profile
+   echo "ulimit -c 0" >>/etc/profile
+fi
+
+if ! grep -q -i "umask" "/etc/bash.bashrc" 2>/dev/null; then
+   echo "umask 077" >>/etc/bash.bashrc
+fi
+
+echo -e "Security:\t\tConfigure Auto Logout"
+if ! grep -q -i "TMOUT" "/etc/profile.d/*" 2>/dev/null; then
+   echo -e 'TMOUT=600\nreadonly TMOUT\nexport TMOUT' >'/etc/profile.d/autologout.sh'
+   chmod +x /etc/profile.d/autologout.sh >/dev/null
+fi
+
+chown root:root /etc/profile.d/autologout.sh >/dev/null 2>&1
+chmod 644 /etc/profile.d/autologout.sh >/dev/null 2>&1
+
+cat <<EOF >/etc/profile.d/autologout.csh
+#!/usr/bin/env csh
+################################################################################
+# Default /etc/profile.d/autologout.csh
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+EOF
+cat <<'EOF' >>/etc/profile.d/autologout.csh
+set autologout=15
+set -r autologout
+EOF
+
+chown root:root /etc/profile.d/autologout.csh >/dev/null 2>&1
+chmod 644 /etc/profile.d/autologout.csh >/dev/null 2>&1
+
+echo -e "Security:\t\tFix some permissions"
+echo -e "Security:\t\tEnsure permissions on /etc/passwd are configured"
+chown root:root /etc/passwd >/dev/null 2>&1
+chmod 644 /etc/passwd >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure permissions on /etc/shadow are configured"
+chown root:root /etc/shadow >/dev/null 2>&1
+chmod 400 /etc/shadow >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure permissions on /etc/group are configured"
+chown root:root /etc/group >/dev/null 2>&1
+chmod 644 /etc/group >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure permissions on /etc/gshadow are configured"
+chown root:root /etc/gshadow >/dev/null 2>&1
+chmod 000 /etc/gshadow >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure permissions on /etc/passwd- are configured"
+chown root:root /etc/passwd- >/dev/null 2>&1
+chmod 600 /etc/passwd- >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure permissions on /etc/shadow- are configured"
+chown root:root /etc/shadow- >/dev/null 2>&1
+chmod 600 /etc/shadow- >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure permissions on /etc/group- are configured"
+chown root:root /etc/group- >/dev/null 2>&1
+chmod 600 /etc/group- >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure permissions on /etc/gshadow- are configured"
+chown root:root /etc/gshadow- >/dev/null 2>&1
+chmod 600 /etc/gshadow- >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure no users have .netrc files"
+for dir in $(cat /etc/passwd | awk -F: '{ print $6 }'); do
+   if [ ! -h "${dir}/.netrc" -a -f "${dir}/.netrc" ]; then
+      rm ${dir}/.netrc >/dev/null 2>&1
+   fi
+done
+
+echo -e "Security:\t\tEnsure no users have .rhosts files"
+for dir in $(cat /etc/passwd | egrep -v '(root|halt|sync|shutdown)' | awk -F: '($7 !="/sbin/nologin") { print $6 }'); do
+   for file in ${dir}/.rhosts; do
+      if [ ! -h "${file}" -a -f "${file}" ]; then
+         rm ${dir}/.rhosts >/dev/null 2>&1
+      fi
+   done
+done
+
+echo -e "Security:\t\tModifying paths"
+sed -i 's/PATH=.*/PATH=\"\/usr\/local\/bin:\/usr\/bin:\/bin:\/usr\/sbin:\/snap\/bin"/' /etc/environment
+cat <<EOF >/etc/profile.d/initpath.sh
+#!/usr/bin/env bash
+################################################################################
+# Default /etc/profile.d/initpath.sh
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+
+# Remove Duplicates from PATH
+PATH=\$(echo \$PATH | /bin/sed ':b;s/:\([^:]*\)\(:.*\):\1/:\1\2/;tb;s/^\([^:]*\)\(:.*\):\1/:\1\2/')
+EOF
+cat <<'EOF' >>/etc/profile.d/initpath.sh
+LANG="en_US.UTF-8"
+
+if [ "$EUID" -eq 0 ]; then
+   export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+else
+   export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/snap/bin
+fi
+EOF
+
+chown root:root /etc/profile.d/initpath.sh >/dev/null 2>&1
+chmod 0644 /etc/profile.d/initpath.sh >/dev/null 2>&1
+
+cat <<EOF >>/etc/skel/.bashrc
+
+# Remove Duplicates from PATH
+PATH=\$(echo \$PATH | /bin/sed ':b;s/:\([^:]*\)\(:.*\):\1/:\1\2/;tb;s/^\([^:]*\)\(:.*\):\1/:\1\2/')
+
+EOF
+
+
+# APT INSTALL
+apt-get -qq --assume-yes install --no-install-recommends vim vim-common vim-tiny >/dev/null 2>&1
+
+
+echo -e "Security:\t\tColor Prompt"
+cat <<EOF >/etc/profile.d/colorpromt.sh
+#!/usr/bin/env bash
+################################################################################
+# Default /etc/profile.d/colorpromt.sh
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+EOF
+cat <<'EOF' >>/etc/profile.d/colorpromt.sh
+# Prompt used when waiting for stuff within 'for' or 'while'...
+PS2="> "
+
+force_color_prompt=yes
+# Test for root and change prompt username to RED, otherwise username is GREEN
+if [ "$EUID" -eq 0 ]; then
+	PS1='\[\033[1;31m\]\u\[\033[1;37m\]@\[\033[1;32m\]\h\[\033[1;37m\]:\[\033[1;31m\]\w \[\033[1;36m\]\$ \[\e[1;37m\]'
+else
+	PS1='\[\033[1;33m\]\u\[\033[1;37m\]@\[\033[1;32m\]\h\[\033[1;37m\]:\[\033[1;31m\]\w \[\033[1;36m\]\$ \[\033[0m\]'
+fi
+EOF
+
+chown root:root /etc/profile.d/colorpromt.sh >/dev/null 2>&1
+chmod 0644 /etc/profile.d/colorpromt.sh >/dev/null 2>&1
+
+echo -e "Security:\t\tShell Aliases"
+cat <<EOF >/etc/profile.d/shellaliases.sh
+#!/usr/bin/env bash
+################################################################################
+# Default /etc/profile.d/shellaliases.sh
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+EOF
+cat <<'EOF' >>/etc/profile.d/shellaliases.sh
+# Detect which 'ls' flavor is in use
+if ls --color > /dev/null 2>&1; then # GNU 'ls'
+	colorflag="--color"
+	export LS_COLORS='no=00:fi=00:di=01;31:ln=01;36:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arj=01;31:*.taz=01;31:*.lzh=01;31:*.zip=01;31:*.z=01;31:*.Z=01;31:*.gz=01;31:*.bz2=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.jpg=01;35:*.jpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.avi=01;35:*.fli=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.ogg=01;35:*.mp3=01;35:*.wav=01;35:'
+else # macOS 'ls'
+	colorflag="-G"
+	export LSCOLORS='BxBxhxDxfxhxhxhxhxcxcx'
+fi
+
+# List all files colorized in long format
+alias l="ls -lF ${colorflag}"
+
+# List all files colorized in long format, including dot files
+alias ll="ls -laF ${colorflag}"
+
+# List only directories
+alias lsd="ls -lF ${colorflag} | grep --color=never '^d'"
+
+# Always use color output for 'ls'
+alias ls="command ls ${colorflag}"
+
+# Always enable colored 'grep' output
+alias grep='grep --color=auto'
+alias fgrep='fgrep --color=auto'
+alias egrep='egrep --color=auto'
+
+# Enable aliases to be sudo?ed
+alias sudo='sudo '
+
+# Get week number
+alias week='date +%V'
+
+# Get Informations about the current OS
+alias distro='cat /etc/*release /etc/*version 2>/dev/null'
+
+#alias ldapsearch="ldapsearch -xW"
+#alias ldapadd="ldapadd -xW"
+#alias ldapmodify="ldapmodify -xW"
+#alias ldapdelete="ldapdelete -xW"
+#alias ldappasswd="ldappasswd -xW"
+#alias ldapwhoami="ldapwhoami -xW"
+#alias ldapvi="ldapvi -b dc=domain,dc=local -D cn=admin,dc=domain,dc=local"
+
+# Reload the shell (i.e. invoke as a login shell)
+alias reload="exec ${SHELL} -l"
+
+# Print each PATH entry on a separate line
+alias path='echo -e ${PATH//:/\\n}'
+
+# Print the UFW logs
+if ! command -v 'rsyslogd' &>/dev/null; then
+   alias ufwlog='sudo journalctl -b --no-page | grep "\[UFW"' # If Rsyslog is not installed
+else
+   alias ufwlog='sudo tail -f /var/log/ufw.log' # If Rsyslog is installed
+fi
+
+# manual local aliases
+# shellcheck disable=SC1090,SC1091
+[ -f ~/.aliases ] && . ~/.aliases
+EOF
+
+chown root:root /etc/profile.d/shellaliases.sh >/dev/null 2>&1
+chmod 0644 /etc/profile.d/shellaliases.sh >/dev/null 2>&1
+
+echo -e "Security:\t\tBash Options"
+cat <<EOF >/etc/profile.d/bash_options.sh
+#!/usr/bin/env bash
+################################################################################
+# Default /etc/profile.d/bash_options.sh
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+EOF
+cat <<'EOF' >>/etc/profile.d/bash_options.sh
+# Enable "vi" editing mode.
+# https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#Readline-vi-Mode
+set -o vi
+
+# Automatically prepend `cd` to directory names.
+shopt -s autocd
+
+# Autocorrect typos in path names when using the `cd` command.
+shopt -s cdspell
+
+# Check the window size after each command and, if necessary, update
+# the values of 'LINES' and 'COLUMNS'.
+shopt -s checkwinsize
+
+# Save all lines of a multiple-line command in the same history entry.
+shopt -s cmdhist
+
+# Include filenames beginning with a "." in the filename expansion.
+shopt -s dotglob
+
+# Use extended pattern matching features.
+shopt -s extglob
+
+# Append to the history file rather then overwriting it.
+shopt -s histappend
+
+# Do not attempt to search the PATH for possible completions when
+# completion is attempted on an empty line.
+shopt -s no_empty_cmd_completion
+
+# Match filenames in a case-insensitive fashion when performing
+# filename expansion.
+shopt -s nocaseglob
+EOF
+
+chown root:root /etc/profile.d/bash_options.sh >/dev/null 2>&1
+chmod 0644 /etc/profile.d/bash_options.sh >/dev/null 2>&1
+
+echo -e "Security:\t\tForce to instantly record HISTFILE every time a command is typed"
+cat <<EOF >/etc/profile.d/os-history.sh
+#!/usr/bin/env bash
+################################################################################
+# Default /etc/profile.d/os-history.sh
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+EOF
+cat <<'EOF' >>/etc/profile.d/os-history.sh
+# improve bash history
+shopt -s histappend
+
+PROMPT_COMMAND='history -a'
+export PROMPT_COMMAND
+
+# Store 10000 commands in bash history
+HISTSIZE=100000
+HISTFILESIZE=2000000
+
+# Don't put duplicate lines in the history
+export HISTCONTROL=ignoredups
+
+# Ignore commands that start with spaces and duplicates.
+export HISTCONTROL=ignoreboth
+
+# Don't add certain commands to the history file.
+export HISTIGNORE="&:[bf]g:c:clear:history:exit:q:pwd:* --help"
+
+# Increase the maximum number of lines of history persisted
+# in the 'Node' REPL history file (default value is 1000).
+# https://github.com/nodejs/node/blob/c948877688ff2b6a37f2c88724b656aae495c7b2/doc/api/repl.md#persistent-history
+export NODE_REPL_HISTORY_SIZE=10000
+EOF
+
+chown root:root /etc/profile.d/os-history.sh >/dev/null 2>&1
+chmod 644 /etc/profile.d/os-history.sh >/dev/null 2>&1
+
+echo -e "Security:\t\tConfigure /etc/systemd/logind.conf"
+sed -i 's/^#KillUserProcesses=no/KillUserProcesses=1/' /etc/systemd/logind.conf
+sed -i 's/^#KillExcludeUsers=root/KillExcludeUsers=root/' /etc/systemd/logind.conf
+sed -i 's/^#IdleAction=ignore/IdleAction=lock/' /etc/systemd/logind.conf
+sed -i 's/^#IdleActionSec=30min/IdleActionSec=15min/' /etc/systemd/logind.conf
+sed -i 's/^#RemoveIPC=yes/RemoveIPC=yes/' /etc/systemd/logind.conf
+
+echo -e "Security:\t\tModify /etc/issue"
+cat <<'EOF' >/etc/issue
+
+Any unauthorized access to this machine is prohibited
+Press <Ctrl-D> if you are not an authorized user
+
+All activity may be observed, reported, and may be used for criminal prosecution.
+
+EOF
+
+# Ensure permissions on /etc/issue are configured
+chown root:root /etc/issue >/dev/null 2>&1
+chmod 0644 /etc/issue >/dev/null 2>&1
+
+echo -e "Security:\t\tModify /etc/issue.net"
+cat <<'EOF' >/etc/issue.net
+
+Any unauthorized access to this machine is prohibited
+Press <Ctrl-D> if you are not an authorized user
+
+All activity may be observed, reported, and may be used for criminal prosecution.
+
+EOF
+
+# Ensure permissions on /etc/issue.net are configured
+chown root:root /etc/issue.net >/dev/null 2>&1
+chmod 0644 /etc/issue.net >/dev/null 2>&1
+
+echo -e "Security:\t\tModify /etc/motd"
+cat <<EOF >/etc/motd
+
+This is a ${ComanyName} (${CompanyShort}) system.
+
+This resource, including all related equipment, networks and network devices, are provided for authorized ${CompanyShort} use.
+${CompanyShort} systems may be monitored for all lawful purposes, including to ensure authorized use, for management of the system, to facilitate protection against unauthorized access and to verify security procedures and operational procedures.
+The monitoring on this system may include audits by authorized ${CompanyShort} personnel to test or verify the validity, security and survivability of this system.
+During monitoring information may be examined, recorded, copied and used for authorized purposes. All information placed on or sent to this system may be subject to such monitoring procedures.
+Use of this ${CompanyShort} system, authorized or unauthorized, constitutes consent to this policy and the policies and procedures set forth by ${CompanyShort}.
+Evidence of unauthorized use collected during monitoring may be used for criminal prosecution by ${CompanyShort} staff, legal counsel and law enforcement agencies.
+
+EOF
+
+# Ensure permissions on /etc/motd are configured
+chown root:root /etc/motd >/dev/null 2>&1
+chmod 0644 /etc/motd >/dev/null 2>&1
+
+chmod a-x /etc/update-motd.d/* >/dev/null 2>&1
+
+if [ -f /etc/default/motd-news ]; then
+   echo -e "Security:\t\tDisable motd-news"
+   sed -i 's/ENABLED=.*/ENABLED=0/' /etc/default/motd-news
+
+   systemctl daemon-reload >/dev/null 2>&1
+   systemctl stop motd-news.timer >/dev/null 2>&1
+   systemctl mask motd-news.timer >/dev/null 2>&1
+   systemctl daemon-reload >/dev/null 2>&1
+fi
+
+echo -e "Security:\t\tFix File Ownership"
+/bin/cat <<EOF >/etc/cron.daily/99_fix_file_ownership
+#!/usr/bin/env sh
+################################################################################
+# Default /etc/cron.daily/99_fix_file_ownership
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+EOF
+/bin/cat <<'EOF' >>/etc/cron.daily/99_fix_file_ownership
+
+# Fix user and group ownership of files without user
+nice -n20 find / -nouser -print 2>/dev/null | nice -n20 xargs chown root > /dev/null 2>&1
+nice -n20 find / -nogroup -print 2>/dev/null | nice -n20 xargs chgrp root > /dev/null 2>&1
+
+EOF
+
+chown root:root /etc/cron.daily/99_fix_file_ownership >/dev/null 2>&1
+chmod 0700 /etc/cron.daily/99_fix_file_ownership >/dev/null 2>&1
+
+/etc/cron.daily/99_fix_file_ownership >/dev/null 2>&1
+
+if [ -f /etc/systemd/coredump.conf ]; then
+   echo -e "Security:\t\tModify /etc/systemd/coredump.conf"
+   sed -i 's/^#Storage=.*/Storage=none/' /etc/systemd/coredump.conf
+   sed -i 's/^#ProcessSizeMax=.*/ProcessSizeMax=0/' /etc/systemd/coredump.conf
+fi
+
+echo -e "Security:\t\tRestrict compiler access"
+# shellcheck disable=2046
+while read -r x; do
+   if [ -f "$x" ] && [ -x "$x" ]; then
+      if ! test -L "$x"; then
+         chmod 0750 "$x" >/dev/null
+      fi
+   fi
+done <<<"$(dpkg-query -L $(dpkg -l | grep compil | awk '{print $2}'))"
+
+ASCOMP="$(command -v as)"
+# shellcheck disable=2046
+if [ -f "${ASCOMP}" ] && [ -x "${ASCOMP}" ]; then
+   chmod 0750 "$(readlink -eq $(command -v as))" >/dev/null
+fi
+
+echo -e "Security:\t\tConfigure Kernel parameters"
+HASHSIZE="/sys/module/nf_conntrack/parameters/hashsize"
+LOCKDOWN="/sys/kernel/security/lockdown"
+
+if [[ -f "${HASHSIZE}" && -w "${HASHSIZE}" ]]; then
+   echo 1048576 >/sys/module/nf_conntrack/parameters/hashsize
+fi
+
+if [[ -f "${LOCKDOWN}" && -w "${LOCKDOWN}" ]]; then
+   if ! grep -q 'lockdown=' /proc/cmdline; then
+      echo "GRUB_CMDLINE_LINUX=\"\$GRUB_CMDLINE_LINUX lockdown=confidentiality\"" >/etc/default/grub.d/99-dsb-hardening-lockdown.cfg
+      chown root:root /etc/default/grub.d/99-dsb-hardening-lockdown.cfg >/dev/null 2>&1
+      chmod 0640 /etc/default/grub.d/99-dsb-hardening-lockdown.cfg >/dev/null 2>&1
+   fi
+fi
+
+echo -e "Security:\t\tConfigure Grub parameters"
+
+# makes many heap overflow attacks more difficult
+echo -e "Security:\t\tDisable slab merging. [Grub]"
+echo "GRUB_CMDLINE_LINUX=\"\$GRUB_CMDLINE_LINUX slab_nomerge\"" >/etc/default/grub.d/40_kernel_hardening_slab_nomerge.cfg
+chown root:root /etc/default/grub.d/40_kernel_hardening_slab_nomerge.cfg >/dev/null 2>&1
+chmod 0640 /etc/default/grub.d/40_kernel_hardening_slab_nomerge.cfg >/dev/null 2>&1
+
+# Redzoning adds extra areas around slabs that detect when a slab is overwritten past its real size, which can help detect overflows
+echo -e "Security:\t\tRedzoning adds extra areas around slabs. [Grub]"
+echo "GRUB_CMDLINE_LINUX=\"\$GRUB_CMDLINE_LINUX slub_debug=P\"" >/etc/default/grub.d/40_kernel_hardening_slub_debug.cfg
+chown root:root /etc/default/grub.d/40_kernel_hardening_slub_debug.cfg >/dev/null 2>&1
+chmod 0640 /etc/default/grub.d/40_kernel_hardening_slub_debug.cfg >/dev/null 2>&1
+
+# Wipe slab and page allocations. Zeroes memory during allocation and free time to prevent leaking secrets in memory.
+echo -e "Security:\t\tWipe slab and page allocations. [Grub]"
+echo "GRUB_CMDLINE_LINUX=\"\$GRUB_CMDLINE_LINUX init_on_alloc=1 init_on_free=1\"" >/etc/default/grub.d/40_kernel_hardening_init_on.cfg
+chown root:root /etc/default/grub.d/40_kernel_hardening_init_on.cfg >/dev/null 2>&1
+chmod 0640 /etc/default/grub.d/40_kernel_hardening_init_on.cfg >/dev/null 2>&1
+
+echo -e "Security:\t\tEnable buddy allocator free poisoning. [Grub]"
+echo "GRUB_CMDLINE_LINUX=\"\$GRUB_CMDLINE_LINUX page_poison=1\"" >/etc/default/grub.d/40_kernel_hardening_page_poison.cfg
+chown root:root /etc/default/grub.d/40_kernel_hardening_page_poison.cfg >/dev/null 2>&1
+chmod 0640 /etc/default/grub.d/40_kernel_hardening_page_poison.cfg >/dev/null 2>&1
+
+# Always enable Kernel Page Table Isolation, even if the CPU claims it is safe from Meltdown and prevents some KASLR bypasses.
+echo -e "Security:\t\tAlways enable Kernel Page Table Isolation. [Grub]"
+echo "GRUB_CMDLINE_LINUX=\"\$GRUB_CMDLINE_LINUX pti=on\"" >/etc/default/grub.d/40_kernel_hardening_pti.cfg
+chown root:root /etc/default/grub.d/40_kernel_hardening_pti.cfg >/dev/null 2>&1
+chmod 0640 /etc/default/grub.d/40_kernel_hardening_pti.cfg >/dev/null 2>&1
+
+echo -e "Security:\t\tEnable general AUDIT functionality. [Grub]"
+echo "GRUB_CMDLINE_LINUX=\"\$GRUB_CMDLINE_LINUX audit=1\"" >/etc/default/grub.d/10_enableaudit.cfg
+chown root:root /etc/default/grub.d/10_enableaudit.cfg >/dev/null 2>&1
+chmod 0640 /etc/default/grub.d/10_enableaudit.cfg >/dev/null 2>&1
+
+grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1
+
+echo -e "Security:\t\tConfigure sudo"
+
+echo -e "Security:\t\tCreate a new group to allow sudo"
+groupadd sudousers >/dev/null 2>&1
+
+echo -e "Security:\t\tAdd the default admin account"
+usermod -a -G sudousers ${AdminUser} >/dev/null 2>&1
+
+cat <<EOF >/etc/sudoers
+################################################################################
+# Default /etc/sudoers
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+EOF
+cat <<'EOF' >>/etc/sudoers
+# This file MUST be edited with the 'visudo' command as root.
+#
+# Please consider adding local content in /etc/sudoers.d/ instead of
+# directly modifying this file.
+#
+Defaults        env_reset #,pwfeedback
+Defaults        pwfeedback
+Defaults        mail_badpass
+Defaults        secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Defaults        timestamp_timeout=0
+Defaults        logfile=/var/log/sudo
+
+# Host alias specification
+
+# User alias specification
+
+# Cmnd alias specification
+
+# User privilege specification
+root    ALL=(ALL:ALL) ALL
+
+# Allow members of group sudo to execute any command
+%sudo   ALL=(ALL:ALL) ALL
+
+# See sudoers(5) for more information on "@include" directives:
+
+@includedir /etc/sudoers.d
+EOF
+
+if [ -f /etc/sudoers ]; then
+   echo -e "Security:\t\tLockdown /etc/sudoers"
+   chown root:root /etc/sudoers >/dev/null 2>&1
+   chmod 640 /etc/sudoers >/dev/null 2>&1
+fi
+
+cat <<EOF >/etc/sudoers.d/${AdminUser}
+################################################################################
+# Default /etc/sudoers.d/${AdminUser}
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+# This file MUST be edited with the 'visudo' command as root.
+#
+# User privilege specification
+${AdminUser} ALL=(ALL:ALL) ALL
+${AdminUser} ALL=(ALL) NOPASSWD:/usr/local/sbin/aptMaint
+EOF
+
+if [ -f /etc/sudoers.d/${AdminUser} ]; then
+   echo -e "Security:\t\tLockdown /etc/sudoers.d/${AdminUser}"
+   chown root:root /etc/sudoers.d/${AdminUser} >/dev/null 2>&1
+   chmod 440 /etc/sudoers.d/${AdminUser} >/dev/null 2>&1
+fi
+
+cat <<EOF >/usr/local/sbin/aptMaint
+#!/usr/bin/env bash
+################################################################################
+# Simple APT Maintenance Script
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+EOF
+cat <<'EOF' >>/usr/local/sbin/aptMaint
+/usr/bin/apt update && /usr/bin/apt upgrade -y && /usr/bin/apt autoremove -y && /usr/bin/apt autoclean -y
+EOF
+
+if [ -f /usr/local/sbin/aptMaint ]; then
+   echo -e "Security:\t\tLockdown /usr/local/sbin/aptMaint"
+   chown root:root /usr/local/sbin/aptMaint >/dev/null 2>&1
+   chmod 700 /usr/local/sbin/aptMaint >/dev/null 2>&1
+fi
+
+echo -e "Security:\t\tEnforce File Permissions"
+if [ -f /etc/cron.allow ]; then
+   echo -e "Security:\t\tLockdown /etc/cron.allow"
+   chown root:root /etc/cron.allow >/dev/null 2>&1
+   chmod 0644 /etc/cron.allow >/dev/null 2>&1
+fi
+
+if [ -f /etc/cron.deny ]; then
+   echo -e "Security:\t\tLockdown /etc/cron.deny"
+   chown root:root /etc/cron.deny >/dev/null 2>&1
+   chmod 0644 /etc/cron.deny >/dev/null 2>&1
+fi
+
+if [ -f /etc/at.allow ]; then
+   echo -e "Security:\t\tLockdown /etc/at.allow"
+   chown root:root /etc/at.allow >/dev/null 2>&1
+   chmod 0644 /etc/at.allow >/dev/null 2>&1
+fi
+
+if [ -f /etc/at.deny ]; then
+   echo -e "Security:\t\tLockdown /etc/at.deny"
+   chown root:root /etc/at.deny >/dev/null 2>&1
+   chmod 0600 /etc/at.deny >/dev/null 2>&1
+fi
+
+if [ -f /etc/crontab ]; then
+   echo -e "Security:\t\tLockdown /etc/crontab"
+   chmod 600 /etc/crontab >/dev/null 2>&1
+fi
+
+if [ -f /etc/shadow ]; then
+   echo -e "Security:\t\tLockdown /etc/shadow"
+   chmod 640 /etc/shadow >/dev/null 2>&1
+fi
+
+if [ -d /etc/cron.d ]; then
+   echo -e "Security:\t\tLockdown /etc/cron.d"
+   chmod 700 /etc/cron.d >/dev/null 2>&1
+fi
+
+if [ -d /etc/cron.daily ]; then
+   echo -e "Security:\t\tLockdown /etc/cron.daily"
+   chmod 700 /etc/cron.daily >/dev/null 2>&1
+fi
+
+if [ -d /etc/cron.hourly ]; then
+   echo -e "Security:\t\tLockdown /etc/cron.hourly"
+   chmod 700 /etc/cron.hourly >/dev/null 2>&1
+fi
+
+if [ -d /etc/cron.weekly ]; then
+   echo -e "Security:\t\tLockdown /etc/cron.weekly"
+   chmod 700 /etc/cron.weekly >/dev/null 2>&1
+fi
+
+if [ -d /etc/cron.monthly ]; then
+   echo -e "Security:\t\tLockdown /etc/cron.monthly"
+   chmod 700 /etc/cron.monthly >/dev/null 2>&1
+fi
+
+if [ -f /boot/grub/grub.cfg ]; then
+   echo -e "Security:\t\tLockdown /boot/grub/grub.cfg"
+   chown root:root /boot/grub/grub.cfg >/dev/null 2>&1
+   chmod 0600 /boot/grub/grub.cfg >/dev/null 2>&1
+fi
+
+if [ -d /etc/default/grub.d ]; then
+   echo -e "Security:\t\tLockdown /etc/default/grub.d"
+   chown root:root /etc/default/grub.d >/dev/null 2>&1
+   chmod 0755 /etc/default/grub.d >/dev/null 2>&1
+fi
+
+if [ -f /etc/default/grub.d/init-select.cfg ]; then
+   echo -e "Security:\t\tLockdown /etc/default/grub.d/init-select.cfg"
+   chown root:root /etc/default/grub.d/init-select.cfg >/dev/null 2>&1
+   chmod 0640 /etc/default/grub.d/init-select.cfg >/dev/null 2>&1
+fi
+
+if [ -f /etc/default/grub.d/audit.cfg ]; then
+   echo -e "Security:\t\tLockdown /etc/default/grub.d/audit.cfg"
+   chown root:root /etc/default/grub.d/audit.cfg >/dev/null 2>&1
+   chmod 0640 /etc/default/grub.d/audit.cfg >/dev/null 2>&1
+fi
+
+if [ -f /etc/default/grub.d/kspp_slab.cfg ]; then
+   echo -e "Security:\t\t/etc/default/grub.d/kspp_slab.cfg"
+   chown root:root /etc/default/grub.d/kspp_slab.cfg >/dev/null 2>&1
+   chmod 0640 /etc/default/grub.d/kspp_slab.cfg >/dev/null 2>&1
+fi
+
+if [ -f /etc/default/grub.d/kspp_vsyscall.cfg ]; then
+   echo -e "Security:\t\tLockdown /etc/default/grub.d/kspp_vsyscall.cfg"
+   chown root:root /etc/default/grub.d/kspp_vsyscall.cfg >/dev/null 2>&1
+   chmod 0640 /etc/default/grub.d/kspp_vsyscall.cfg >/dev/null 2>&1
+fi
+
+if [ -f /etc/hosts.allow ]; then
+   echo -e "Security:\t\tLockdown /etc/hosts.allow"
+   chown root:root /etc/hosts.allow >/dev/null 2>&1
+   chmod 0644 /etc/hosts.allow >/dev/null 2>&1
+fi
+
+if [ -f /etc/hosts.deny ]; then
+   echo -e "Security:\t\tLockdown /etc/hosts.deny"
+   chown root:root /etc/hosts.deny >/dev/null 2>&1
+   chmod 0644 /etc/hosts.deny >/dev/null 2>&1
+fi
+
+echo -e "Security:\t\tRestrict access to compilers"
+# It doesn''t add much to security these days.
+# Lot of people remove compilers because they can theoretically be used for exploits.
+# If the attacker can get in to your server, he can get own tools in as well so removing things like compilers doesn't add much to your overall security.
+
+# Limit the Access to Compilers (based on a security group) is another valis and solid option!
+
+if [ -f /usr/bin/as ]; then
+   echo -e "Security:\t\tLockdown /usr/bin/as"
+   chmod o-rx /usr/bin/as >/dev/null 2>&1
+fi
+
+if [ -f /usr/bin/byacc ]; then
+   echo -e "Security:\t\tLockdown /usr/bin/byacc"
+   chmod 000 /usr/bin/byacc >/dev/null 2>&1
+   chattr +i /usr/bin/byacc
+fi
+
+if [ -f /usr/bin/yacc ]; then
+   echo -e "Security:\t\tLockdown /usr/bin/yacc"
+   chmod 000 /usr/bin/yacc >/dev/null 2>&1
+   chattr +i /usr/bin/yacc
+fi
+
+if [ -f /usr/bin/bcc ]; then
+   echo -e "Security:\t\tLockdown /usr/bin/bcc"
+   chmod 000 /usr/bin/bcc >/dev/null 2>&1
+   chattr +i /usr/bin/bcc
+fi
+
+if [ -f /usr/bin/kgcc ]; then
+   echo -e "Security:\t\tLockdown /usr/bin/kgcc"
+   chmod 000 /usr/bin/kgcc >/dev/null 2>&1
+   chattr +i /usr/bin/kgcc
+fi
+
+if [ -f /usr/bin/cc ]; then
+   echo -e "Security:\t\tLockdown /usr/bin/cc"
+   chmod 000 /usr/bin/cc >/dev/null 2>&1
+   chattr +i /usr/bin/cc
+fi
+
+if [ -f /usr/bin/gcc ]; then
+   echo -e "Security:\t\tLockdown /usr/bin/gcc"
+   chmod 000 /usr/bin/gcc >/dev/null 2>&1
+   chattr +i /usr/bin/gcc
+fi
+
+if [ -f /usr/bin/x86_64-linux-gnu-as ]; then
+   echo -e "Security:\t\tLockdown /usr/bin/x86_64-linux-gnu-as"
+   chmod o-x /usr/bin/x86_64-linux-gnu-as >/dev/null 2>&1
+fi
+
+if [ -f /usr/bin/x86_64-linux-gnu-gcc-9 ]; then
+   echo -e "Security:\t\tLockdown /usr/bin/x86_64-linux-gnu-gcc-9"
+   chmod o-x /usr/bin/x86_64-linux-gnu-gcc-9 >/dev/null 2>&1
+fi
+
+if [ ! -d ~/.ssh ]; then
+   mkdir -p ~/.ssh >/dev/null 2>&1
+fi
+
+echo -e "Security:\t\tLockdown ~/.ssh"
+chmod 700 ~/.ssh >/dev/null 2>&1
+
+if [ -f ~/.ssh/authorized_keys2 ]; then
+   echo -e "Security:\t\tLockdown ~/.ssh/authorized_keys2"
+   chmod 600 ~/.ssh/authorized_keys2 >/dev/null 2>&1
+fi
+
+if [ -f ~/.ssh/authorized_keys ]; then
+   echo -e "Security:\t\tLockdown ~/.ssh/authorized_keys"
+   chmod 600 ~/.ssh/authorized_keys >/dev/null 2>&1
+fi
+
+echo -e "Security:\t\tEnforce strong password usage"
+sed -i -r -e "s/^(password\s+requisite\s+pam_pwquality.so)(.*)$/# \1\2         # commented by $(whoami) on $(date +"%Y-%m-%d @ %H:%M:%S")\n\1 retry=3 minlen=10 difok=3 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 maxrepeat=3 gecoschec         # added by $(whoami) on $(date +"%Y-%m-%d @ %H:%M:%S")/" /etc/pam.d/common-password
+# Switching to sha512
+sed -i "s/yescrypt/sha512/g" /etc/pam.d/common-password
+
+echo -e "Security:\t\tPost processing"
+apt-get install fwupd secureboot-db -y >/dev/null 2>&1
+update-grub >/dev/null 2>&1
+find /boot/ -type f -name '*.cfg' -exec chmod 0400 {} \;
+
+echo -e "Security:\t\tCleanup Group memberships"
+CleanupGroups="loppy cdrom audio dip video plugdev netdev bluetooth"
+for CleanupGroup in ${CleanupGroups}; do
+   gpasswd -d ${AdminUser} ${CleanupGroup} >/dev/null 2>&1
+done
+
+echo -e "Security:\t\tDo not enforce password reset and expiration time for default users"
+# Note: This is not a good practice, but it is required for some applications to work properly
+ChageUsers="root ${AdminUser}"
+for ChageUser in ${ChageUsers}; do
+   chage -M -1 ${ChageUser} >/dev/null 2>&1
+   chage -I -1 -m 0 -M 99999 -E -1 ${ChageUser} >/dev/null 2>&1
+done
+
+echo -e "Extend:\t\tEnsure that our admin users are member of wheel"
+WheelUsers="root ${AdminUser}"
+for WheelUser in ${WheelUsers}; do
+   usermod -a -G wheel ${WheelUser} >/dev/null 2>&1
+done
+
+###
+# Install the Microsoft Debian Repository
+###
+echo -e "Misc:\t\tInstall the Microsoft Debian Repository"
+
+wget -O /root/packages-microsoft-prod.deb https://packages.microsoft.com/config/debian/$VERSION_ID/packages-microsoft-prod.deb >/dev/null 2>&1
+dpkg --force-all --install /root/packages-microsoft-prod.deb >/dev/null 2>&1
+rm -f /root/packages-microsoft-prod.deb >/dev/null 2>&1
+# refresh the apt cache
+apt-get update -y >/dev/null 2>&1
+# Just in case there are any updates for the Microsoft Debian Repository
+apt-get upgrade -y >/dev/null 2>&1
+
+# Try to install the latest .NET and PowerShell packages from the Microsoft Debian Repository
+echo -e "Misc:\t\tInstall PowerShell"
+PWSH_INSTALL="powershell"
+apt-get install ${PWSH_INSTALL} -y >/dev/null 2>&1
+
+# .NET installer script will be downloaded and installed globally
+DOTNETDEPS_INSTALL="libc6 libgcc1 libgssapi-krb5-2 libicu72 libssl1.1 libstdc++6 zlib1g"
+apt-get install ${DOTNETDEPS_INSTALL} -y >/dev/null 2>&1
+# Download the .NET install script
+wget -O /root/dotnet-install.sh https://dot.net/v1/dotnet-install.sh >/dev/null 2>&1
+# Install it globally
+cp /root/dotnet-install.sh /usr/local/bin/dotnet-install.sh >/dev/null 2>&1
+# Make it executable
+chmod +x /root/dotnet-install.sh >/dev/null 2>&1
+# Make it executable globally
+chmod 755 /usr/local/bin/dotnet-install.sh >/dev/null 2>&1
+
+# Check if .NET is installed
+DOTNETBIN="$(command -v dotnet)"
+if [ $? -ne 0 ]; then
+   echo -e "Misc:\t\tInstall .NET from GitHub (Workaround)"
+   /root/dotnet-install.sh --channel LTS --runtime dotnet >/dev/null 2>&1
+fi
+
+echo -e "Misc:\t\tInstall the .NET handler"
+cat <<'EOF' >>/etc/profile.d/initpath.sh
+
+# Modify the PATH for .NET
+export DOTNET_ROOT=$HOME/.dotnet
+
+if [ "$EUID" -ne 0 ]; then
+   if [ ! -d $DOTNET_ROOT ]; then
+      if [ -f /usr/local/bin/dotnet-install.sh ]; then
+         echo -e ".NET is not installed for your user. If you like to install .NET:"
+         echo -e "/usr/local/bin/dotnet-install.sh --channel LTS --runtime dotnet"
+      fi
+   else
+      export PATH=$PATH:$DOTNET_ROOT:$DOTNET_ROOT/tools
+   fi
+fi
+EOF
+
+# Check if PowerShell is installed
+PWSHBIN="$(command -v pwsh)"
+if [ $? -ne 0 ]; then
+   # Microsoft screwed up here... No PowerShell for Debian 12 (Bookworm) yet!
+   wget -O /root/powershell_7.4.0-1.deb_amd64.deb https://github.com/PowerShell/PowerShell/releases/download/v7.4.0/powershell_7.4.0-1.deb_amd64.deb >/dev/null 2>&1
+   echo -e "Misc:\t\tInstall PowerShell from GitHub (Workaround)"
+   # OK we have the file, let's install it
+   dpkg --force-all --install /root/powershell_7.4.0-1.deb_amd64.deb >/dev/null 2>&1
+   rm -f /root/powershell_7.4.0-1.deb_amd64.deb >/dev/null 2>&1
+fi
+
+mkdir -p /etc/opt/omi/conf/ >/dev/null 2>&1
+
+echo -e "Misc:\t\tInstall the latest OMI release"
+# https://github.com/microsoft/omi/releases
+wget -O /root/omi-1.7.1-0.ssl_300.ulinux.s.x64.deb https://github.com/microsoft/omi/releases/download/v1.7.1-0/omi-1.7.1-0.ssl_300.ulinux.s.x64.deb >/dev/null 2>&1
+dpkg --force-all --install /root/omi-1.7.1-0.ssl_300.ulinux.s.x64.deb >/dev/null 2>&1
+rm -f /root/omi-1.7.1-0.ssl_300.ulinux.s.x64.deb >/dev/null 2>&1
+
+# install the latest DSC release
+echo -e "Misc:\t\tInstall the latest DSC release"
+# https://github.com/microsoft/PowerShell-DSC-for-Linux/releases
+wget -O /root/dsc-1.2.4-0.ssl_110.x64.deb https://github.com/microsoft/PowerShell-DSC-for-Linux/releases/download/v1.2.4-0/dsc-1.2.4-0.ssl_110.x64.deb >/dev/null 2>&1
+dpkg --force-all --install /root/dsc-1.2.4-0.ssl_110.x64.deb >/dev/null 2>&1
+rm -f /root/dsc-1.2.4-0.ssl_110.x64.deb >/dev/null 2>&1
+
+# install the latest OMI release
+cat <<EOF >/etc/opt/omi/conf/omiserver.conf
+################################################################################
+# Default /etc/opt/omi/conf/omiserver.conf
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+#
+# See: https://github.com/microsoft/omi/blob/master/Unix/doc/setup-kerberos-omi.md
+# omiserver configuration file
+################################################################################
+EOF
+cat <<'EOF' >>/etc/opt/omi/conf/omiserver.conf
+NoSSLv2=true
+NoSSLv3=true
+NoTLSv1_0=true
+NoTLSv1_1=true
+NoTLSv1_2=false
+NoSSLCompression=true
+sslciphersuite=ALL:!SSLv2:!SSLv3:!TLSv1:!TLSv0:!CBC:!RC4-MD5:!RC4-SHA:!SEED-SHA
+#service=<DSCSERVICEACCOUNT>
+EOF
+
+chmod 644 /etc/opt/omi/conf/omiserver.conf >/dev/null 2>&1
+chown root:omiusers /etc/opt/omi/conf/omiserver.conf >/dev/null 2>&1
+
+cat <<EOF >/etc/opt/omi/conf/omicli.conf
+################################################################################
+# Default /etc/opt/omi/conf/omiserver.conf
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+#
+# See: https://github.com/microsoft/omi/blob/master/Unix/doc/setup-kerberos-omi.md
+# omicli configuration file
+################################################################################
+EOF
+cat <<'EOF' >>/etc/opt/omi/conf/omicli.conf
+NoSSLv2=true
+NoSSLv3=true
+NoTLSv1_0=true
+NoTLSv1_1=true
+NoTLSv1_2=false
+NoSSLCompression=true
+EOF
+
+chmod 644 /etc/opt/omi/conf/omicli.conf >/dev/null 2>&1
+chown root:omiusers /etc/opt/omi/conf/omicli.conf >/dev/null 2>&1
+
+cat <<EOF >/etc/opt/omi/conf/omilogrotate.conf
+################################################################################
+# Default /etc/opt/omi/conf/omilogrotate.conf
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+EOF
+cat <<'EOF' >>/etc/opt/omi/conf/omilogrotate.conf
+# omi logs rotate configuration settings
+/var/opt/omi/log/*.log /var/opt/omi/log/*.trc {
+   # keep 5 worth of backlogs
+   rotate 5
+
+   # If the log file is missing, go on to the next one
+   # without issuing an error message.
+   missingok
+
+   # Do not rotate the log if it is empty,
+   # this overrides the ifempty option.
+   notifempty
+
+   # Old versions of log files are compressed with gzip by default.
+   compress
+
+   # Log files are rotated only if they grow bigger then 100M.
+   size 100M
+
+   # Truncate the original log file in place after creating a copy,
+   # instead of moving the old log file and optionally creating a new one.
+   copytruncate
+}
+EOF
+
+chmod 644 /etc/opt/omi/conf/omilogrotate.conf >/dev/null 2>&1
+chown root:omiusers /etc/opt/omi/conf/omilogrotate.conf >/dev/null 2>&1
+
+cat <<EOF >/etc/opt/omi/conf/dsc/dsc.conf
+################################################################################
+# Default /etc/opt/omi/conf/dsc/dsc.conf
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+EOF
+cat <<'EOF' >>/etc/opt/omi/conf/dsc/dsc.conf
+# dsc configuration file
+NoSSLv3=true
+DoNotCheckCertificate=true
+sslciphersuite=ALL:!SSLv2:!SSLv3:!TLSv1:!TLSv0:!CBC:!RC4-MD5:!RC4-SHA:!SEED-SHA
+#CURL_CA_BUNDLE=
+#PROXY=
+EOF
+
+chmod 644 /etc/opt/omi/conf/dsc/dsc.conf >/dev/null 2>&1
+chown root:omiusers /etc/opt/omi/conf/dsc/dsc.conf >/dev/null 2>&1
+
+# Note: Set the hostname again (workaround for a bug in this script)
+# We use the serial number of the system to generate a unique hostname (only the last 10 characters are used)
+newhostname=$(dmidecode -s system-serial-number | sed 's/[^a-zA-Z0-9]//g' | tail -c 10)
+# Now we add a prefix to the hostname
+newhostname="D12-$newhostname"
+hostnamectl set-hostname $newhostname --no-ask-password >/dev/null 2>&1
+hostnamectl hostname $newhostname --no-ask-password >/dev/null 2>&1
+echo -e "Misc:\t\tSet the hostname to $newhostname"
+
+echo -e "Security:\t\tGenerate SSH Host Keys - Highest encryption that makes sense"
+# Remove any existing SSH host keys, we generate new ones
+rm -rf /etc/ssh/ssh_host_*_key* >/dev/null 2>&1
+
+# Generate SSH host keys for the new system
+SSHKEYCOMMENT="HOST_$(uname -n)_$(date -I)"
+ssh-keygen -h -b 4096 -t rsa -a 100 -q -N "" -C $SSHKEYCOMMENT -f /etc/ssh/ssh_host_rsa_key >/dev/null 2>&1
+ssh-keygen -h -b 1024 -t dsa -a 100 -q -N "" -C $SSHKEYCOMMENT -f /etc/ssh/ssh_host_dsa_key >/dev/null 2>&1
+ssh-keygen -h -b 521 -t ecdsa -a 100 -q -N "" -C $SSHKEYCOMMENT -f /etc/ssh/ssh_host_ecdsa_key >/dev/null 2>&1
+ssh-keygen -h -t ed25519 -a 100 -q -N "" -C $SSHKEYCOMMENT -f /etc/ssh/ssh_host_ed25519_key >/dev/null 2>&1
+
+# Fix the SSH directory permissions
+chown root:root /etc/ssh/ >/dev/null 2>&1
+chmod 755 /etc/ssh/ >/dev/null 2>&1
+
+# Set the correct permissions on the SSH host keys
+chown root:root /etc/ssh/ssh_host_*_key >/dev/null 2>&1
+chmod 0600 /etc/ssh/ssh_host_*_key >/dev/null 2>&1
+chown root:root /etc/ssh/ssh_host_*_key.pub >/dev/null 2>&1
+chmod 0600 /etc/ssh/ssh_host_*_key.pub >/dev/null 2>&1
+
+echo -e "Misc:\t\tInstalling Hyper-V package via APT"
+apt-get install -y hyperv-daemons >/dev/null 2>&1
+# Enable Hyper-V modules
+cat <<'EOF' >>/etc/initramfs-tools/modules
+
+# Hyper-V Modules
+hv_vmbus
+hv_storvsc
+hv_blkvsc
+hv_netvsc
+hv_balloon
+hv_utils
+EOF
+
+# Update the initramfs
+update-initramfs -u >/dev/null 2>&1
+
+mkdir -p /usr/libexec/hypervkvpd/ >/dev/null 2>&1
+
+cat <<'EOF' >/usr/libexec/hypervkvpd/hv_get_dns_info
+#!/usr/bin/env bash
+# See: https://github.com/torvalds/linux/blob/master/tools/hv/
+
+cat /etc/resolv.conf 2>/dev/null | awk '/^nameserver/ { print $2 }'
+EOF
+
+chown root:root /usr/libexec/hypervkvpd/hv_get_dns_info >/dev/null 2>&1
+chmod 770 /usr/libexec/hypervkvpd/hv_get_dns_info >/dev/null 2>&1
+
+cat <<'EOF' >/usr/libexec/hypervkvpd/hv_get_dhcp_info
+#!/usr/bin/env bash
+# See: https://github.com/torvalds/linux/blob/master/tools/hv/
+
+if_file="/etc/sysconfig/network-scripts/ifcfg-"$1
+
+dhcp=$(grep "dhcp" $if_file 2>/dev/null)
+
+if [ "$dhcp" != "" ];
+then
+   echo "Enabled"
+else
+   echo "Disabled"
+fi
+EOF
+
+chown root:root /usr/libexec/hypervkvpd/hv_get_dhcp_info >/dev/null 2>&1
+chmod 770 /usr/libexec/hypervkvpd/hv_get_dhcp_info >/dev/null 2>&1
+
+cat <<'EOF' >/usr/libexec/hypervkvpd/hv_set_ifconfig
+#!/usr/bin/env bash
+# See: https://github.com/torvalds/linux/blob/master/tools/hv/
+
+echo "IPV6INIT=yes" >> $1
+echo "NM_CONTROLLED=no" >> $1
+echo "PEERDNS=yes" >> $1
+echo "ONBOOT=yes" >> $1
+
+cp $1 /etc/sysconfig/network-scripts/
+
+chmod 600 $2
+interface=$(echo $2 | awk -F - '{ print $2 }')
+filename="${2##*/}"
+
+sed '/\[connection\]/a autoconnect=true' $2 > /etc/NetworkManager/system-connections/${filename}
+
+
+/sbin/ifdown $interface 2>/dev/null
+/sbin/ifup $interface 2>/dev/null
+EOF
+
+chown root:root /usr/libexec/hypervkvpd/hv_set_ifconfig >/dev/null 2>&1
+chmod 770 /usr/libexec/hypervkvpd/hv_set_ifconfig >/dev/null 2>&1
+
+echo -e "Misc:\t\tImproving Linux System Performance with I/O Scheduler Tuning"
+echo deadline >/sys/block/sda/queue/scheduler
+sed -i 's#^\(GRUB_CMDLINE_LINUX_DEFAULT="quiet\)"$#\1 elevator=noop"#' /etc/default/grub
+update-grub2 >/dev/null 2>&1
+
+echo -e "Misc:\t\tKernel Samepage Merging (KSM)"
+echo "1" >/sys/kernel/mm/ksm/run
+
+echo -e "Misc:\t\tRemoving unused packages"
+apt-get clean -y >/dev/null 2>&1
+apt-get autoremove -y >/dev/null 2>&1
+deb_clean=$(dpkg -l | grep '^rc' | awk '{print $2}')
+if ${deb_clean}; then
+   apt-get purge ${deb_clean} -y >/dev/null 2>&1
+fi
+
+echo -e "Misc:\t\tReload the systemd daemon to apply the changes"
+systemctl daemon-reload >/dev/null 2>&1
+
+echo -e "Misc:\t\tClear system crash report files"
+rm -rfv /var/crash/* >/dev/null 2>&1
+rm -rfv /var/lib/systemd/coredump/ >/dev/null 2>&1
+
+echo -e "Misc:\t\tClear APT package file lists"
+rm -rfv /var/lib/apt/lists/* >/dev/null 2>&1
+
+echo -e "Misc:\t\tClear system-wide cache"
+rm -rf /var/cache/* >/dev/null 2>&1
+
+echo -e "Misc:\t\tClear Flatpak application cache"
+rm -rfv ~/.var/app/*/cache/* >/dev/null 2>&1
+
+echo -e "Misc:\t\tClear global temporary folders"
+rm -rfv /tmp/* >/dev/null 2>&1
+rm -rfv /var/tmp/* >/dev/null 2>&1
+
+config_file='/etc/popularity-contest.conf'
+if [ -f "$config_file" ]; then
+   echo -e "Misc:\t\tDisable participation in Popularity Contest"
+   sed -i '/PARTICIPATE/c\PARTICIPATE=no' "$config_file"
+fi
+
+apt_package_name='popularity-contest'
+if status="$(dpkg-query -W --showformat='${db:Status-Status}' "$apt_package_name" 2>&1)" &&
+   [ "$status" = installed ]; then
+   echo -e "Misc:\t\tRemove Popularity Contest (popcon) package"
+   apt-get purge -y "$apt_package_name"
+fi
+
+echo -e "Misc:\t\tDisable .NET telemetry"
+variable='DOTNET_CLI_TELEMETRY_OPTOUT'
+value='1'
+declaration_file='/etc/environment'
+if ! [ -f "$declaration_file" ]; then
+   touch "$declaration_file"
+fi
+assignment_start="$variable="
+assignment="$variable=$value"
+if ! grep --quiet "^$assignment_start" "${declaration_file}"; then
+   echo -n $'\n'"$assignment" | tee -a "$declaration_file" >/dev/null
+else
+   if grep --quiet "^$assignment$" "${declaration_file}"; then
+      echo -e "Misc:\t\tSkipping. Variable \"$variable\" is already set to value \"$value\"."
+   else
+      if ! sed --in-place "/^$assignment_start/d" "$declaration_file"; then
+         echo >&2 "Failed to delete assignment starting with \"$assignment_start\"."
+      else
+         if ! echo -n $'\n'"$assignment" | tee -a "$declaration_file" >/dev/null; then
+            echo >&2 "Failed to add assignment \"$assignment\"."
+         fi
+      fi
+   fi
+fi
+
+echo -e "Misc:\t\tDisable PowerShell Core telemetry"
+variable='POWERSHELL_TELEMETRY_OPTOUT'
+value='1'
+declaration_file='/etc/environment'
+if ! [ -f "$declaration_file" ]; then
+   touch "$declaration_file"
+fi
+assignment_start="$variable="
+assignment="$variable=$value"
+if ! grep --quiet "^$assignment_start" "${declaration_file}"; then
+   echo -n $'\n'"$assignment" | tee -a "$declaration_file" >/dev/null
+else
+   if grep --quiet "^$assignment$" "${declaration_file}"; then
+      echo -e "Misc:\t\tSkipping. Variable \"$variable\" is already set to value \"$value\"."
+   else
+      if ! sed --in-place "/^$assignment_start/d" "$declaration_file"; then
+         echo >&2 "Failed to delete assignment starting with \"$assignment_start\"."
+      else
+         if ! echo -n $'\n'"$assignment" | tee -a "$declaration_file" >/dev/null; then
+            echo >&2 "Failed to add assignment \"$assignment\"."
+         else
+            echo -e "Misc:\t\tSuccessfully reconfigured ($assignment)."
+         fi
+      fi
+   fi
+fi
+
+echo -e "Misc:\t\tClear bash history"
+rm -fv /root/.bash_history >/dev/null 2>&1
+
+echo -e "Misc:\t\tClear Zsh history"
+rm -fv /root/.zsh_history >/dev/null 2>&1
+
+echo -e "Misc:\t\tClear tcsh history"
+rm -fv /root/.history >/dev/null 2>&1
+
+echo -e "Misc:\t\tClear fish history"
+rm -fv /root/.local/share/fish/fish_history >/dev/null 2>&1
+rm -fv /root/.config/fish/fish_history >/dev/null 2>&1
+
+echo -e "Misc:\t\tClear KornShell (ksh) history"
+rm -fv /root/.sh_history >/dev/null 2>&1
+
+echo -e "Misc:\t\tClear ash history"
+rm -fv /root/.ash_history >/dev/null 2>&1
+
+echo -e "Misc:\t\tClear crosh history"
+rm -fv /root/.crosh_history >/dev/null 2>&1
+
+echo -e "Misc:\t\tClear Snap cache"
+rm -rfv /var/lib/snapd/cache/* >/dev/null 2>&1
+
+if ! command -v 'snap' &>/dev/null; then
+   echo -e 'Misc:\t\tSkipping to Remove old Snap packages, "snap" is not found.'
+else
+   echo -e "Misc:\t\tRemove old Snap packages"
+   snap list --all | while read name version rev tracking publisher notes; do
+      if [[ $notes = *disabled* ]]; then
+         snap remove "$name" --revision="$rev"
+      fi
+   done
+fi
+
+if ! command -v 'flatpak' &>/dev/null; then
+   echo -e 'Misc:\t\tRemove skiped because "flatpak" is not found.'
+else
+   echo -e "Misc:\t\tRemove orphaned Flatpak runtimes"
+   flatpak uninstall --unused --noninteractive >/dev/null 2>&1
+   # Temporary cache
+   rm -rfv /var/tmp/flatpak-cache-* >/dev/null 2>&1
+   # New cache
+   rm -rfv ~/.cache/flatpak/system-cache/* >/dev/null 2>&1
+   # Old cache
+   rm -rfv ~/.local/share/flatpak/system-cache/* >/dev/null 2>&1
+fi
+
+echo -e "Security:\t\tInstall UFW (Uncomplicated Firewall)"
+apt-get update >/dev/null 2>&1
+apt-get upgrade -y >/dev/null 2>&1
+apt-get install -y ufw >/dev/null 2>&1
+
+if command -v 'ufw' &>/dev/null; then
+   echo -e "Security:\t\tConfigure UFW (Uncomplicated Firewall)"
+   cat <<EOF >/etc/ufw/ufw.conf
+################################################################################
+# Default /etc/ufw/ufw.conf
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+EOF
+   cat <<'EOF' >>/etc/ufw/ufw.conf
+ENABLED=yes
+IPV6=yes
+LOGLEVEL=low
+EOF
+
+   echo -e "Security:\t\tUFW: Disabling"
+   ufw --force disable >/dev/null
+
+   echo -e "Security:\t\tUFW: Force a reset"
+   ufw --force reset >/dev/null
+
+   echo -e "Security:\t\tUFW: Force a reset for iptables"
+   iptables -F >/dev/null 2>&1
+   iptables -X >/dev/null 2>&1
+   iptables -t nat -F >/dev/null 2>&1
+   iptables -t nat -X >/dev/null 2>&1
+   iptables -t mangle -F >/dev/null 2>&1
+   iptables -t mangle -X >/dev/null 2>&1
+   iptables -P INPUT ACCEPT >/dev/null 2>&1
+   iptables -P FORWARD ACCEPT >/dev/null 2>&1
+   iptables -P OUTPUT ACCEPT >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: > Deny all outgoing traffic"
+   ufw default deny outgoing comment 'Deny all outgoing traffic' >/dev/null
+
+   echo -e "Security:\t\tUFW: < Deny all incoming traffic"
+   ufw default deny incoming comment 'Deny all incoming traffic' >/dev/null
+
+   if [ ! -d "/etc/ufw/applications.d/" ]; then
+      mkdir -p /etc/ufw/applications.d/ >/dev/null 2>&1
+   fi
+
+   echo -e "Security:\t\tUFW: Disable IPv4 Ping"
+   cat <<EOF >/etc/ufw/before.rules
+################################################################################
+# Default /etc/ufw/before.rules
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+# Don't delete these required lines, otherwise there will be errors
+*filter
+:ufw-before-input - [0:0]
+:ufw-before-output - [0:0]
+:ufw-before-forward - [0:0]
+:ufw-not-local - [0:0]
+# End required lines
+
+# Allow all on loopback
+-A ufw-before-input -i lo                                                                -j ACCEPT
+-A ufw-before-output -o lo                                                               -j ACCEPT
+
+# Quickly process packets for which we already have a connection
+-A ufw-before-input -m conntrack --ctstate RELATED,ESTABLISHED                           -j ACCEPT
+-A ufw-before-output -m conntrack --ctstate RELATED,ESTABLISHED                          -j ACCEPT
+-A ufw-before-forward -m conntrack --ctstate RELATED,ESTABLISHED                         -j ACCEPT
+
+# Drop INVALID packets (logs these in loglevel medium and higher)
+-A ufw-before-input -m conntrack --ctstate INVALID                                       -j ufw-logging-deny
+-A ufw-before-input -m conntrack --ctstate INVALID                                       -j DROP
+
+# Block unreachable info (don't care)
+-A ufw-before-input -p icmp --icmp-type destination-unreachable                          -j DROP
+
+# Ok icmp codes for INPUT
+-A ufw-before-input -p icmp --icmp-type source-quench                                    -j ACCEPT
+-A ufw-before-input -p icmp --icmp-type time-exceeded                                    -j ACCEPT
+-A ufw-before-input -p icmp --icmp-type parameter-problem                                -j ACCEPT
+
+# Allow Pings from this System
+-A ufw-before-input -s ${AllowPingFromIP} -p icmp --icmp-type echo-request                        -j ACCEPT
+
+# Allow Pings from this Network
+-A ufw-before-input -s ${AllowPingFromNetwork} -p icmp --icmp-type echo-request                  -j ACCEPT
+
+# Block all  other Pings
+-A ufw-before-input -p icmp --icmp-type echo-request                                     -j DROP
+
+# Ok icmp code for FORWARD
+-A ufw-before-forward -p icmp --icmp-type destination-unreachable                        -j ACCEPT
+-A ufw-before-forward -p icmp --icmp-type source-quench                                  -j ACCEPT
+-A ufw-before-forward -p icmp --icmp-type time-exceeded                                  -j ACCEPT
+-A ufw-before-forward -p icmp --icmp-type parameter-problem                              -j ACCEPT
+-A ufw-before-forward -p icmp --icmp-type echo-request                                   -j ACCEPT
+
+# Allow dhcp client to work (Seems to have an issue)
+-A ufw-before-input -p udp --sport 67 --dport 68                                         -j ACCEPT
+-A ufw-before-input -p udp --sport 68 --dport 67                                         -j ACCEPT
+
+# ufw-not-local
+-A ufw-before-input                                                                      -j ufw-not-local
+
+# If LOCAL, RETURN
+-A ufw-not-local -m addrtype --dst-type LOCAL                                            -j RETURN
+
+# If MULTICAST, RETURN
+-A ufw-not-local -m addrtype --dst-type MULTICAST                                        -j RETURN
+
+# If BROADCAST, RETURN
+-A ufw-not-local -m addrtype --dst-type BROADCAST                                        -j RETURN
+
+# All other non-local packets are dropped
+-A ufw-not-local -m limit --limit 3/min --limit-burst 10                                 -j ufw-logging-deny
+-A ufw-not-local                                                                         -j DROP
+
+# Allow MULTICAST mDNS for service discovery (be sure the MULTICAST line above
+# is uncommented)
+-A ufw-before-input -p udp -d 224.0.0.251 --dport 5353                                   -j ACCEPT
+
+# Allow MULTICAST UPnP for service discovery (be sure the MULTICAST line above
+# is uncommented)
+-A ufw-before-input -p udp -d 239.255.255.250 --dport 1900                               -j ACCEPT
+
+# Allow outbound icmp
+-A ufw-before-output -p icmp -m state --state NEW,ESTABLISHED,RELATED                    -j ACCEPT
+-A ufw-before-output -p icmp -m state --state ESTABLISHED,RELATED                        -j ACCEPT
+
+# Don't delete the 'COMMIT' line or these rules won't be processed
+COMMIT
+EOF
+
+   echo -e "Security:\t\tUFW: Allow Management Network"
+   cat <<EOF >/etc/ufw/after.rules
+################################################################################
+# Default /etc/ufw/after.rules
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+# Don't delete these required lines, otherwise there will be errors
+*filter
+:ufw-after-input - [0:0]
+:ufw-after-output - [0:0]
+:ufw-after-forward - [0:0]
+# End required lines
+
+# Don't log noisy services by default
+-A ufw-after-input -p udp --dport 137                                                    -j ufw-skip-to-policy-input
+-A ufw-after-input -p udp --dport 138                                                    -j ufw-skip-to-policy-input
+-A ufw-after-input -p tcp --dport 139                                                    -j ufw-skip-to-policy-input
+-A ufw-after-input -p tcp --dport 445                                                    -j ufw-skip-to-policy-input
+-A ufw-after-input -p udp --dport 67                                                     -j ufw-skip-to-policy-input
+-A ufw-after-input -p udp --dport 68                                                     -j ufw-skip-to-policy-input
+
+# Don't log portscan from the management node
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 21                                        -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 22                                        -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 23                                        -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 25                                        -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 53                                        -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 80                                        -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 110                                       -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 111                                       -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 113                                       -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 135                                       -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 143                                       -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 199                                       -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 256                                       -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 443                                       -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 445                                       -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 554                                       -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 587                                       -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 993                                       -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 995                                       -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 1025                                      -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 1433                                      -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 3306                                      -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 3389                                      -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 8888                                      -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 8080                                      -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 1720                                      -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 1723                                      -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 5414                                      -j ufw-skip-to-policy-input
+-A ufw-after-input -s ${UFWQuietHost} -p tcp --dport 5900                                      -j ufw-skip-to-policy-input
+
+# Don't log noisy broadcast
+-A ufw-after-input -m addrtype --dst-type BROADCAST                                      -j ufw-skip-to-policy-input
+
+# Allow outbound icmp
+-A ufw-after-output -p icmp -m state --state NEW,ESTABLISHED,RELATED                     -j ACCEPT
+-A ufw-after-output -p icmp -m state --state ESTABLISHED,RELATED                         -j ACCEPT
+
+# don't delete the 'COMMIT' line or these rules won't be processed
+COMMIT
+EOF
+
+   echo -e "Security:\t\tUFW: Disable IPv6 Ping"
+   cat <<EOF >/etc/ufw/before6.rules
+################################################################################
+# Default /etc/ufw/before6.rules
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+EOF
+   cat <<'EOF' >>/etc/ufw/before6.rules
+# Don't delete these required lines, otherwise there will be errors
+*filter
+:ufw6-before-input - [0:0]
+:ufw6-before-output - [0:0]
+:ufw6-before-forward - [0:0]
+# End required lines
+
+# Allow all on loopback
+-A ufw6-before-input -i lo                                                               -j ACCEPT
+-A ufw6-before-output -o lo                                                              -j ACCEPT
+
+# Drop packets with RH0 headers
+-A ufw6-before-input -m rt --rt-type 0                                                   -j DROP
+-A ufw6-before-forward -m rt --rt-type 0                                                 -j DROP
+-A ufw6-before-output -m rt --rt-type 0                                                  -j DROP
+
+# Quickly process packets for which we already have a connection
+-A ufw6-before-input -m conntrack --ctstate RELATED,ESTABLISHED                          -j ACCEPT
+-A ufw6-before-output -m conntrack --ctstate RELATED,ESTABLISHED                         -j ACCEPT
+-A ufw6-before-forward -m conntrack --ctstate RELATED,ESTABLISHED                        -j ACCEPT
+
+# Multicast ping replies are part of the ok icmp codes for INPUT (rfc4890,
+# 4.4.1 and 4.4.2), but don't have an associated connection and are otherwise
+# be marked INVALID, so allow here instead.
+-A ufw6-before-input -p icmpv6 --icmpv6-type echo-reply                                  -j ACCEPT
+
+# Drop INVALID packets (logs these in loglevel medium and higher)
+-A ufw6-before-input -m conntrack --ctstate INVALID                                      -j ufw6-logging-deny
+-A ufw6-before-input -m conntrack --ctstate INVALID                                      -j DROP
+
+# Ok icmp codes for INPUT (rfc4890, 4.4.1 and 4.4.2)
+-A ufw6-before-input -p icmpv6 --icmpv6-type destination-unreachable                     -j ACCEPT
+-A ufw6-before-input -p icmpv6 --icmpv6-type packet-too-big                              -j ACCEPT
+# Codes 0 and 1
+-A ufw6-before-input -p icmpv6 --icmpv6-type time-exceeded                               -j ACCEPT
+# Codes 0-2 (echo-reply needs to be before INVALID, see above)
+-A ufw6-before-input -p icmpv6 --icmpv6-type parameter-problem                           -j ACCEPT
+-A ufw6-before-input -s 2003:d4:7f07:44fc::1/64 -p icmpv6 --icmpv6-type echo-request     -j ACCEPT
+-A ufw6-before-input -p icmpv6 --icmpv6-type echo-request                                -j DROP
+-A ufw6-before-input -p icmpv6 --icmpv6-type router-solicitation -m hl --hl-eq 255       -j ACCEPT
+-A ufw6-before-input -p icmpv6 --icmpv6-type router-advertisement -m hl --hl-eq 255      -j ACCEPT
+-A ufw6-before-input -p icmpv6 --icmpv6-type neighbor-solicitation -m hl --hl-eq 255     -j ACCEPT
+-A ufw6-before-input -p icmpv6 --icmpv6-type neighbor-advertisement -m hl --hl-eq 255    -j ACCEPT
+# IND solicitation
+-A ufw6-before-input -p icmpv6 --icmpv6-type 141 -m hl --hl-eq 255                       -j ACCEPT
+# IND advertisement
+-A ufw6-before-input -p icmpv6 --icmpv6-type 142 -m hl --hl-eq 255                       -j ACCEPT
+# MLD query
+-A ufw6-before-input -p icmpv6 --icmpv6-type 130 -s fe80::/10                            -j ACCEPT
+# MLD report
+-A ufw6-before-input -p icmpv6 --icmpv6-type 131 -s fe80::/10                            -j ACCEPT
+# MLD done
+-A ufw6-before-input -p icmpv6 --icmpv6-type 132 -s fe80::/10                            -j ACCEPT
+# MLD report v2
+-A ufw6-before-input -p icmpv6 --icmpv6-type 143 -s fe80::/10                            -j ACCEPT
+# SEND certificate path solicitation
+-A ufw6-before-input -p icmpv6 --icmpv6-type 148 -m hl --hl-eq 255                       -j ACCEPT
+# SEND certificate path advertisement
+-A ufw6-before-input -p icmpv6 --icmpv6-type 149 -m hl --hl-eq 255                       -j ACCEPT
+# MR advertisement
+-A ufw6-before-input -p icmpv6 --icmpv6-type 151 -s fe80::/10 -m hl --hl-eq 1            -j ACCEPT
+# MR solicitation
+-A ufw6-before-input -p icmpv6 --icmpv6-type 152 -s fe80::/10 -m hl --hl-eq 1            -j ACCEPT
+# MR termination
+-A ufw6-before-input -p icmpv6 --icmpv6-type 153 -s fe80::/10 -m hl --hl-eq 1            -j ACCEPT
+
+# Ok icmp codes for FORWARD (rfc4890, 4.3.1)
+-A ufw6-before-forward -p icmpv6 --icmpv6-type destination-unreachable                   -j ACCEPT
+-A ufw6-before-forward -p icmpv6 --icmpv6-type packet-too-big                            -j ACCEPT
+# Codes 0 and 1
+-A ufw6-before-forward -p icmpv6 --icmpv6-type time-exceeded                             -j ACCEPT
+# Codes 0-2
+-A ufw6-before-forward -p icmpv6 --icmpv6-type parameter-problem                         -j ACCEPT
+-A ufw6-before-forward -p icmpv6 --icmpv6-type echo-request                              -j ACCEPT
+-A ufw6-before-forward -p icmpv6 --icmpv6-type echo-reply                                -j ACCEPT
+# Ok icmp codes for FORWARD (rfc4890, 4.3.2)
+# Home Agent Address Discovery Reques
+-A ufw6-before-input -p icmpv6 --icmpv6-type 144                                         -j ACCEPT
+# Home Agent Address Discovery Reply
+-A ufw6-before-input -p icmpv6 --icmpv6-type 145                                         -j ACCEPT
+# Mobile Prefix Solicitation
+-A ufw6-before-input -p icmpv6 --icmpv6-type 146                                         -j ACCEPT
+# Mobile Prefix Advertisement
+-A ufw6-before-input -p icmpv6 --icmpv6-type 147                                         -j ACCEPT
+
+# Allow dhcp client to work
+-A ufw6-before-input -p udp -s fe80::/10 --sport 547 -d fe80::/10 --dport 546            -j ACCEPT
+
+# Allow MULTICAST mDNS for service discovery
+-A ufw6-before-input -p udp -d ff02::fb --dport 5353                                     -j ACCEPT
+
+# Allow MULTICAST UPnP for service discovery
+-A ufw6-before-input -p udp -d ff02::f --dport 1900                                      -j ACCEPT
+
+# Allow outbound icmp
+-A ufw6-before-input -p icmpv6 -m state --state NEW,ESTABLISHED,RELATED                  -j ACCEPT
+-A ufw6-before-input -p icmpv6 -m state --state ESTABLISHED,RELATED                      -j ACCEPT
+
+# Allow Echo Request [RFC4443]
+-A ufw6-before-output -p icmpv6 --icmpv6-type 128                                        -j ACCEPT
+
+# Allow Router Solicitation [RFC4861]
+-A ufw6-before-output -p icmpv6 --icmpv6-type 133                                        -j ACCEPT
+
+# Allow Neighbor Solicitation [RFC4861]
+-A ufw6-before-output -p icmpv6 --icmpv6-type 135                                        -j ACCEPT
+
+# Allow Neighbor Advertisement [RFC4861]
+-A ufw6-before-output -p icmpv6 --icmpv6-type 136                                        -j ACCEPT
+
+# Allow Version 2 Multicast Listener Report [RFC3810]
+-A ufw6-before-output -p icmpv6 --icmpv6-type 143                                        -j ACCEPT
+
+# Allow Traceroute
+-A ufw6-before-output -p udp --dport 33434:33534                                         -j ACCEPT
+
+# Allow DHCPv6 requests
+-A ufw6-before-output -p udp --sport 546 --dport 547                                     -j ACCEPT
+
+# Don't delete the 'COMMIT' line or these rules won't be processed
+COMMIT
+EOF
+
+   echo -e "Security:\t\tUFW: Allow Management Network"
+   cat <<EOF >/etc/ufw/after6.rules
+################################################################################
+# Default /etc/ufw/after6.rules
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+EOF
+   cat <<'EOF' >>/etc/ufw/after6.rules
+# Don't delete these required lines, otherwise there will be errors
+*filter
+:ufw6-after-input - [0:0]
+:ufw6-after-output - [0:0]
+:ufw6-after-forward - [0:0]
+# End required lines
+
+# Don't log noisy services by default
+-A ufw6-after-input -p udp --dport 137                                                   -j ufw6-skip-to-policy-input
+-A ufw6-after-input -p udp --dport 138                                                   -j ufw6-skip-to-policy-input
+-A ufw6-after-input -p tcp --dport 139                                                   -j ufw6-skip-to-policy-input
+-A ufw6-after-input -p tcp --dport 445                                                   -j ufw6-skip-to-policy-input
+-A ufw6-after-input -p udp --dport 546                                                   -j ufw6-skip-to-policy-input
+-A ufw6-after-input -p udp --dport 547                                                   -j ufw6-skip-to-policy-input
+
+# Don't delete the 'COMMIT' line or these rules won't be processed
+COMMIT
+EOF
+
+   echo -e "Security:\t\tUFW: Add SSH as custom application"
+   cat <<EOF >/etc/ufw/applications.d/${CompanyShort}-SSH
+################################################################################
+# Default /etc/ufw/applications.d/${CompanyShort}-SSH
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+#
+# SSH or Secure Shell is a cryptographic network protocol for operating
+# network services securely over an unsecured network.
+################################################################################
+[${CompanyShort}-SSH]
+EOF
+   cat <<'EOF' >>/etc/ufw/applications.d/${CompanyShort}-SSH
+title=SSH (Secure Shell)
+description=SSH or Secure Shell is a cryptographic network protocol for operating network services securely over an unsecured network.
+ports=22/tcp|22/udp
+EOF
+
+   echo -e "Security:\t\tUFW: > Allow Domain Name System (DNS) [TCP/UDP]"
+   ufw allow out DNS comment 'OUT: Allow Domain Name System (DNS) [TCP/UDP]' >/dev/null
+
+echo -e "Security:\t\tUFW: Add DNS as custom application"
+   cat <<EOF >/etc/ufw/applications.d/${CompanyShort}-DNS
+################################################################################
+# Default /etc/ufw/applications.d/${CompanyShort}-DNS
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+#
+# The Domain Name System (DNS) is a hierarchical and decentralized naming
+# Active Directory uses UDP and TCP, so we enable both.
+################################################################################
+[${CompanyShort}-DNS]
+EOF
+   cat <<'EOF' >>/etc/ufw/applications.d/${CompanyShort}-DNS
+title=Allow Domain Name System (DNS) [TCP/UDP]
+description=The Domain Name System (DNS) is a hierarchical and decentralized naming. Active Directory uses UDP and TCP.
+ports=53/tcp|53/udp
+EOF
+
+   echo -e "Security:\t\tUFW: Add NTP as custom application"
+   cat <<EOF >/etc/ufw/applications.d/${CompanyShort}-NTP
+################################################################################
+# Default /etc/ufw/applications.d/${CompanyShort}-NTP
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+#
+# The Network Time Protocol (NTP) is a networking protocol for clock
+# synchronization between computer systems over packet-switched,
+# variable-latency data networks.
+################################################################################
+[${CompanyShort}-NTP]
+EOF
+   cat <<'EOF' >>/etc/ufw/applications.d/${CompanyShort}-NTP
+title=Network Time Protocol
+description=The Network Time Protocol (NTP) is a networking protocol for clock synchronization between computer systems over packet-switched, variable-latency data networks.
+ports=123/tcp|123/udp
+EOF
+
+   echo -e "Security:\t\tUFW: Add FTP as custom application"
+   cat <<EOF >/etc/ufw/applications.d/${CompanyShort}-FTP
+################################################################################
+# Default /etc/ufw/applications.d/${CompanyShort}-FTP
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+#
+# The File Transfer Protocol (FTP) is a standard network protocol used for the
+# transfer of computer files from a server to a client on a computer network.
+################################################################################
+[${CompanyShort}-FTP]
+EOF
+   cat <<'EOF' >>/etc/ufw/applications.d/${CompanyShort}-FTP
+title=File Transfer Protocol
+description=The File Transfer Protocol (FTP) is a standard network protocol used for the transfer of computer files from a server to a client on a computer network.
+ports=20/tcp|21/tcp|21/udp
+EOF
+
+   echo -e "Security:\t\tUFW: Add LDAP as custom application"
+   cat <<EOF >/etc/ufw/applications.d/${CompanyShort}-LDAP
+################################################################################
+# Default /etc/ufw/applications.d/${CompanyShort}-LDAP
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+#
+# The Lightweight Directory Access Protocol is an open, vendor-neutral, industry
+# standard application protocol for accessing and maintaining distributed
+# directory information services over an Internet Protocol (IP) network.
+################################################################################
+[${CompanyShort}-LDAP]
+EOF
+   cat <<'EOF' >>/etc/ufw/applications.d/${CompanyShort}-LDAP
+title=Lightweight Directory Access Protocol
+description=The Lightweight Directory Access Protocol is an open, vendor-neutral, industry standard application protocol for accessing and maintaining distributed directory information services over an Internet Protocol (IP) network.
+ports=389/tcp|389/udp
+EOF
+
+   echo -e "Security:\t\tUFW: Add LDAPS as custom application"
+   cat <<EOF >/etc/ufw/applications.d/${CompanyShort}-LDAPS
+################################################################################
+# Default /etc/ufw/applications.d/${CompanyShort}-LDAPS
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+#
+# The Lightweight Directory Access over TLS/SSL Protocol is an open,
+# vendor-neutral, industry standard application protocol for accessing and
+# maintaining distributed directory information services over an Internet
+# Protocol (IP) network.
+################################################################################
+[${CompanyShort}-LDAPS]
+EOF
+   cat <<'EOF' >>/etc/ufw/applications.d/${CompanyShort}-LDAPS
+title=Lightweight Directory Access over TLS/SSL Protocol
+description=The Lightweight Directory Access over TLS/SSL Protocol is an open, vendor-neutral, industry standard application protocol for accessing and maintaining distributed directory information services over an Internet Protocol (IP) network.
+ports=636/tcp|636/udp
+EOF
+
+   echo -e "Security:\t\tUFW: Add Active Directory Global Catalog"
+   cat <<EOF >/etc/ufw/applications.d/${CompanyShort}-ADGC
+################################################################################
+# Default /etc/ufw/applications.d/${CompanyShort}-ADGC
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+#
+# Active Directory Global Catalog
+################################################################################
+[${CompanyShort}-ADGC]
+EOF
+   cat <<'EOF' >>/etc/ufw/applications.d/${CompanyShort}-ADGC
+title=Active Directory Global Catalog
+description=A Global Catalog holds a full set of attributes for the domain in which it resides and a subset of attributes for all objects in the Microsoft Active Directory Forest.
+ports=3268/tcp|3268/udp|3269/tcp|3269/udp
+EOF
+
+   echo -e "Security:\t\tUFW: Add Active Directory Certificate Authority (CA)"
+   cat <<EOF >/etc/ufw/applications.d/${CompanyShort}-ADCS
+################################################################################
+# Default /etc/ufw/applications.d/${CompanyShort}-ADCS
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+#
+# Active Directory Certificate Authority (CA)
+################################################################################
+[${CompanyShort}-ADCS]
+EOF
+   cat <<'EOF' >>/etc/ufw/applications.d/${CompanyShort}-ADCS
+title=Active Directory Certificate Authority (CA)
+description=ctive Directory Certificate Services (AD CS) is a Windows Server role for issuing and managing public key infrastructure (PKI) certificates used in secure communication and authentication protocols.
+ports=8080/tcp|8443/tcp
+EOF
+
+   echo -e "Security:\t\tUFW: Kerberos (SSSD)"
+   cat <<EOF >/etc/ufw/applications.d/${CompanyShort}-SSSD
+################################################################################
+# Default /etc/ufw/applications.d/${CompanyShort}-SSSD
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+#
+# System Security Services Daemon (SSSD) Kerberos
+################################################################################
+[${CompanyShort}-SSSD]
+EOF
+   cat <<'EOF' >>/etc/ufw/applications.d/${CompanyShort}-SSSD
+title=Kerberos for SSSD
+description=All Kerberos ports for System Security Services Daemon (SSSD).
+ports=88/tcp|88/udp|445/tcp|464/tcp|464/udp|749/tcp|749/udp
+EOF
+
+   echo -e "Security:\t\tUFW: SAMBA (SMB)"
+   cat <<EOF >/etc/ufw/applications.d/${CompanyShort}-SAMBA
+################################################################################
+# Default /etc/ufw/applications.d/${CompanyShort}-SAMBA
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+#
+# SAMBA (SMB)
+################################################################################
+[${CompanyShort}-SAMBA]
+EOF
+   cat <<'EOF' >>/etc/ufw/applications.d/${CompanyShort}-SAMBA
+title=SAMBA (SMB)
+description=SAMBA (SMB) Ports
+ports=445/tcp|137/udp|137/tcp|138/udp|139/tcp
+EOF
+
+   echo -e "Security:\t\tUFW: Add DHCPv6Client as custom application"
+   cat <<EOF >/etc/ufw/applications.d/${CompanyShort}-DHCPv6Client
+################################################################################
+# Default /etc/ufw/applications.d/${CompanyShort}-DHCPv6Client
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+#
+# The Dynamic Host Configuration Protocol version 6 (DHCPv6) is a network
+# protocol for configuring Internet Protocol version 6 (IPv6) hosts with
+# IP addresses.
+################################################################################
+[${CompanyShort}-DHCPv6Client]
+EOF
+   cat <<'EOF' >>/etc/ufw/applications.d/${CompanyShort}-DHCPv6Client
+title=DHCPv6-Client
+description=The Dynamic Host Configuration Protocol version 6 (DHCPv6) is a network protocol for configuring Internet Protocol version 6 (IPv6) hosts with IP addresses.
+ports=546/udp|547/udp|546/tcp|547/tcp
+EOF
+
+   echo -e "Security:\t\tUFW: Add DHCPv4Client as custom application"
+   cat <<EOF >/etc/ufw/applications.d/${CompanyShort}-DHCPv4Client
+################################################################################
+# Default /etc/ufw/applications.d/${CompanyShort}-DHCPv4Client
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+#
+# The Dynamic Host Configuration Protocol (DHCP) is a network management
+# protocol used on Internet Protocol (IP) networks
+################################################################################
+[${CompanyShort}-DHCPv4Client]
+EOF
+   cat <<'EOF' >>/etc/ufw/applications.d/${CompanyShort}-DHCPv4Client
+title=Dynamic Host Configuration Protocol
+description=The Dynamic Host Configuration Protocol (DHCP) is a network management protocol used on Internet Protocol (IP) networks
+ports=67,68/udp
+EOF
+
+   echo -e "Security:\t\tUFW: Add WHOIS as custom application"
+   cat <<EOF >/etc/ufw/applications.d/${CompanyShort}-WHOIS
+################################################################################
+# Default /etc/ufw/applications.d/${CompanyShort}-WHOIS
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+#
+# WHOIS (pronounced as the phrase "who is") is a query and response protocol
+# that is widely used for querying databases that store the registered users
+# or assignees of an Internet resource
+################################################################################
+[${CompanyShort}-WHOIS]
+EOF
+   cat <<'EOF' >>/etc/ufw/applications.d/${CompanyShort}-WHOIS
+title=whois
+description=WHOIS (pronounced as the phrase "who is") is a query and response protocol that is widely used for querying databases that store the registered users or assignees of an Internet resource (RFC 3912)
+ports=43/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/CUPS
+[CUPS]
+title=Common UNIX Printing System server
+description=CUPS is a printing system with support for IPP, samba, lpd, and other protocols.
+ports=631
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/L2TP
+[L2TP]
+title=Layer 2 Tunneling Protocol
+description=VPN/tunnel
+ports=1701/udp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/MongoDB
+[MongoDB]
+title=MongoDB
+description=High-performance, open source, schema-free document-oriented data stores
+ports=27017/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/Dovecot
+[Dovecot IMAP]
+title=Secure mail server (IMAP)
+description=Dovecot is a mail server whose major goals are security and extreme reliability.
+ports=143/tcp
+
+[Dovecot Secure IMAP]
+title=Secure mail server (IMAPS)
+description=Dovecot is a mail server whose major goals are security and extreme reliability.
+ports=993/tcp
+
+[Dovecot POP3]
+title=Secure mail server (POP3)
+description=Dovecot is a mail server whose major goals are security and extreme reliability.
+ports=110/tcp
+
+[Dovecot Secure POP3]
+title=Secure mail server (POP3S)
+description=Dovecot is a mail server whose major goals are security and extreme reliability.
+ports=995/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/MySQL
+[MySQL]
+title=MySQL
+description=SQL (Structured Query Language) database server
+ports=3306/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/Nginx
+[Nginx HTTP]
+title=Web Server (Nginx, HTTP)
+description=Small, but very powerful and efficient web server
+ports=80/tcp
+
+[Nginx HTTPS]
+title=Web Server (Nginx, HTTPS)
+description=Small, but very powerful and efficient web server
+ports=443/tcp
+
+[Nginx Full]
+title=Web Server (Nginx, HTTP + HTTPS)
+description=Small, but very powerful and efficient web server
+ports=80,443/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/OpenVPN
+[OpenVPN]
+title=OpenVPN
+description=Virtual private network or secure tunnel daemon.
+ports=1194
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/WireGuard
+[WireGuard]
+title=WireGuard
+description=WireGuard is an extremely simple yet fast and modern VPN that utilizes state-of-the-art cryptography.
+ports=51820/udp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/PPTP
+[PPTP]
+title=Point-to-Point Tunneling Protocol
+description=VPN/tunnel
+ports=1723/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/PostgreSQL
+[PostgreSQL]
+title=PostgreSQL
+description=Fully featured object-relational database management system.
+ports=5433/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/Privoxy
+[Privoxy]
+title=Privoxy
+description=Web proxy with advanced filtering capabilities
+ports=8118/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/Prometheus
+[Prometheus]
+title=Prometheus
+description=Monitoring system and time series database
+ports=9090/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/RDP
+[RDP]
+title=RDP
+description=Remote Desktop Protocol
+ports=3389/tcp|3389/udp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/SIP
+[SIP]
+title=SIP
+description=Session Initiation Protocol
+ports=5060|5061
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/SNMP
+[SNMP]
+title=SNMP
+description=Simple Network Management Protocol
+ports=161/tcp|162/tcp|161/udp|162/udp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/TFP
+[TFTP]
+title=TFTP
+description=Trivial File Transfer Protocol (RFC 783)
+ports=69/udp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/Tor
+[Tor]
+title=Tor
+description=Anonymizing overlay for TCP
+ports=9040,9050,9051,9053,9119/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/elasticsearch
+[ElasticSearch]
+title=elasticsearch
+description=Distributed RESTful search engine built for the cloud
+ports=9200,9300/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/grafana
+[Grafana]
+title=Grafana
+description=Beautiful visualizations for analytics and monitoring
+ports=3000/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/kibana
+[kibana]
+title=kibana
+description=Explore and visualize your Elasticsearch data.
+ports=5601/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/logstash
+[logstash]
+title=logstash
+description=An extensible logging pipeline.
+ports=5000/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/mosh
+[mosh]
+title=Mosh (mobile shell)
+description=Mobile shell that supports roaming and intelligent local echo
+ports=60000:61000/udp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/prometheus-blackbox-exporter
+[prometheus-blackbox-exporter]
+title=prometheus-blackbox-exporter
+description=Prometheus exporter for blackbox probing of network endpoints
+ports=9115/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/prometheus-node-exporter
+[prometheus-node-exporter]
+title=prometheus-node-exporter
+description=Prometheus exporter for machine metrics
+ports=9100/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/redis
+[Redis]
+title=Redis
+description=Persistent key-value database
+ports=6379/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/wsdd
+[wsdd]
+title=wsdd Service
+description=wsdd implements a Web Service Discovery host daemon. This enables (Samba) hosts, like your local NAS device, to be found by Web Service Discovery Clients like Windows.
+ports=3702/udp|5357/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/mDNS
+[mDNS]
+title=mDNS
+description=Multicast DNS lookups and service registrations.
+ports=5353/udp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/JetDirect
+[JetDirect]
+title=JetDirect
+description=Raw print data stream (AppSocket/JetDirect).
+ports=9100/tcp|9101/tcp|9102/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/HPLIP
+[HPLIP]
+title=HPLIP
+description=HP Printers
+ports=161:162/tcp|9100/tcp|5353/udp|427/udp|137/udp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/kdeconnect
+[KDE Connect]
+title=KDE Connect
+description=KDE Connect enables your devices to communicate with each other
+ports=1714:1764/udp|1714:1764/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/MPD
+[MPD]
+title=MPD server
+description=Flexible, powerful, server-side application for playing music
+ports=6600/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/tailscale
+[tailscale]
+title=Tailscale
+description=Tailscale is a mesh VPN that makes it easy to connect your devices, wherever they are
+ports=3478,41641/udp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/Synergy
+[Synergy]
+title=Syngery
+description=Synergy lets you easily share your mouse and keyboard between multiple computers on your desk
+ports=24800/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/AMANDA
+[AMANDA]
+title=AMANDA Backup
+description=AMANDA the Advanced Maryland Automatic Network Disk Archiver
+ports=10080
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/SSDP
+[SSDP]
+title=SSDP
+description=Simple Service Discovery Protocol (SSDP) is a network protocol based on the Internet Protocol Suite for advertisement and discovery of network services and presence information.
+ports=1900/udp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/Apache
+[Apache]
+title=Web Server
+description=Apache v2 is the next generation of the omnipresent Apache web server.
+ports=80/tcp
+
+[Apache Secure]
+title=Web Server (HTTPS)
+description=Apache v2 is the next generation of the omnipresent Apache web server.
+ports=443/tcp
+
+[Apache Full]
+title=Web Server (HTTP,HTTPS)
+description=Apache v2 is the next generation of the omnipresent Apache web server.
+ports=80,443/tcp
+EOF
+
+   cat <<EOF >/etc/ufw/applications.d/vsftpd
+[vsftpd]
+title=vsftpd FTP Server (Standard)
+description=Well known vsftpd Server
+ports=20/tcp|21/tcp|11100:11300/tcp
+EOF
+
+   chown root:root /etc/ufw/applications.d/* >/dev/null 2>&1
+   chmod 644 /etc/ufw/applications.d/* >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: > Allow Hypertext Transfer Protocol (HTTP)"
+   ufw app update 'WWW' >/dev/null 2>&1
+   ufw allow out 'WWW' comment 'OUT: Allow Hypertext Transfer Protocol (HTTP) [TCP]' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: > Allow Hypertext Transfer Protocol Secure (HTTPS) traffic out"
+   ufw app update 'WWW Secure' >/dev/null 2>&1
+   ufw allow out 'WWW Secure' comment 'OUT: Allow Hypertext Transfer Protocol Secure (HTTPS) [TCP]' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: Allow the SMTP client to send mail (Simple Mail Transfer Protocol)"
+   ufw app update 'SMTP' >/dev/null 2>&1
+   ufw allow out 'SMTP' comment 'OUT: Allow the SMTP client to send mail (Simple Mail Transfer Protocol) [TCP]' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: Allow the SMTP client to send mail (Message submission agent)"
+   ufw app update 'Mail submission' >/dev/null 2>&1
+   ufw allow out 'Mail submission' comment 'OUT: Allow the SMTP client to send mail (Message submission agent) [TCP]' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: Allow Syslog (System-Logs) out"
+   ufw app update 'syslog' >/dev/null 2>&1
+   ufw allow out 'syslog' comment 'OUT: Allow Syslog (System-Logs) [UDP]' >/dev/null 2>&1
+
+   ufw app update ${CompanyShort}-FTP >/dev/null 2>&1
+   ufw allow out ${CompanyShort}-FTP comment 'OUT: Allow FTP [TCP/UDP]' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: > Allow SSH related"
+   ufw app update ${CompanyShort}-SSH >/dev/null 2>&1
+   ufw allow out ${CompanyShort}-SSH comment 'OUT: Allow SSH [TCP/UDP]' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: < Allow limited SSH"
+   ufw limit in ${CompanyShort}-SSH comment 'IN: Allow limited SSH [TCP/UDP]' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: > Allow Domain Name System (DNS) [TCP/UDP]"
+   ufw app update ${CompanyShort}-DNS >/dev/null 2>&1
+   ufw allow out ${CompanyShort}-DNS comment 'OUT: Allow Domain Name System (DNS) [TCP/UDP]' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: > Allow Network Time Protocol (NTP)"
+   ufw app update ${CompanyShort}-NTP >/dev/null 2>&1
+   ufw allow out ${CompanyShort}-NTP comment 'OUT: Allow Network Time Protocol (NTP) [TCP/UDP]' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: > Allow Lightweight Directory Access Protocol (LDAP)"
+   ufw app update ${CompanyShort}-LDAP >/dev/null 2>&1
+   ufw allow out ${CompanyShort}-LDAP comment 'OUT: Allow Lightweight Directory Access Protocol (LDAP) [TCP/UDP]' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: > Allow Lightweight Directory Access over TLS/SSL (LDAPS)"
+   ufw app update ${CompanyShort}-LDAPS >/dev/null 2>&1
+   ufw allow out ${CompanyShort}-LDAPS comment 'OUT: Allow Lightweight Directory Access over TLS/SSL (LDAPS) [TCP/UDP]' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: > Allow Active Directory Global Catalog"
+   ufw app update ${CompanyShort}-ADGC >/dev/null 2>&1
+   ufw allow out ${CompanyShort}-ADGC comment 'OUT: Allow Active Directory Global Catalog' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: > Allow Active Directory Certificate Authority (CA)"
+   ufw app update ${CompanyShort}-ADCS >/dev/null 2>&1
+   ufw allow out ${CompanyShort}-ADCS comment 'OUT: Allow Active Directory Certificate Authority (CA)' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: > Allow System Security Services Daemon (SSSD)"
+   ufw app update ${CompanyShort}-SSSD >/dev/null 2>&1
+   ufw allow out ${CompanyShort}-SSSD comment 'OUT: Allow System Security Services Daemon (SSSD)' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: > Allow SAMBA (SMB)"
+   ufw app update ${CompanyShort}-SAMBA >/dev/null 2>&1
+   ufw allow out ${CompanyShort}-SAMBA comment 'OUT: Allow SAMBA (SMB)' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: > Allow DHCPv6Client (DHCPv6)"
+   ufw app update ${CompanyShort}-DHCPv6Client >/dev/null 2>&1
+   ufw allow out ${CompanyShort}-DHCPv6Client comment 'OUT: Allow HCPv6-Client (DHCPv6Client) [TCP/UDP]' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: > Allow Dynamic Host Configuration Protocol (BOOTP/DHCP)"
+   ufw app update ${CompanyShort}-DHCPv4Client >/dev/null 2>&1
+   ufw allow out ${CompanyShort}-DHCPv4Client comment 'OUT: Allow HCPv6-Client (BOOTP/DHCP) [UDP]' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: Reject outgoing mDNS"
+   ufw app update 'mDNS' >/dev/null 2>&1
+   ufw reject out 'mDNS' comment 'OUT: Reject mDNS' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: Reject outgoing SSDP"
+   ufw app update 'SSDP' >/dev/null 2>&1
+   ufw reject out 'SSDP' comment 'OUT: Reject SSDP' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: Reject outgoing Bonjour"
+   ufw reject out Bonjour comment 'OUT: Reject Bonjour' >/dev/null 2>&1
+
+   echo -e "Security:\t\tUFW: Enable ufw"
+   ufw --force enable >/dev/null 2>&1
+   systemctl enable --now ufw >/dev/null 2>&1
+   # Tweak the logging of UFW if rsyslog is installed
+   sed '/#& stop/s/^#//' -i /etc/rsyslog.d/20-ufw.conf >/dev/null 2>&1
+   # Logs all blocked packets not matching the defined policy (with rate limiting), as well as packets matching logged rules
+   ufw logging low >/dev/null 2>&1
+fi
+
+echo -e "Security:\t\tInstall fail2ban (ban hosts that cause multiple authentication errors)"
+apt-get update >/dev/null 2>&1
+apt-get upgrade -y >/dev/null 2>&1
+apt-get install -y fail2ban >/dev/null 2>&1
+
+if command -v 'fail2ban-client' &>/dev/null; then
+   echo -e "Security:\t\tConfigure fail2ban"
+   cat <<EOF >/etc/fail2ban/jail.local
+################################################################################
+# Default /etc/fail2ban/jail.local
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+[INCLUDES]
+# Debian configuration file
+before = paths-debian.conf
+
+[DEFAULT]
+# We use incremental bans, so we want longer bans by default.
+bantime.increment = true
+bantime.factor = 2
+bantime.formula = ban.Time * (1<<(ban.Count if ban.Count<20 else 20)) * banFactor
+bantime.maxtime = 1d
+# Ignore IPs (e.g. localhost, Firewall, and management network)
+ignoreip = 127.0.0.1/8 ::1 ${UFWQuietHost} ${AllowPingFromNetwork}
+ignorecommand =
+# Ban time in minutes
+bantime  = 30m
+# Timespan for counting failed login attempts (in minutes)
+findtime  = 120m
+# Number of failed login attempts before ban
+maxretry = 3
+maxmatches = %(maxretry)s
+# Backend used (systemd for Debian 12 and newer)
+backend = systemd
+usedns = warn
+logencoding = auto
+# Disable jails by default
+enabled = false
+mode = normal
+filter = %(__name__)s[mode=%(mode)s]
+# Who get the report email
+destemail = root@localhost
+# Sender of the report email
+sender = fail2ban@localhost
+# MTA used for sending mail
+mta = mail
+protocol = tcp
+chain = <known/chain>
+port = 0:65535
+fail2ban_agent = Fail2Ban/%(fail2ban_version)s
+# We use UFW as firewall frontend
+banaction = ufw
+banaction_allports = ufw
+action_ = %(banaction)s[port="%(port)s", protocol="%(protocol)s", chain="%(chain)s"]
+action_mw = %(action_)s
+            %(mta)s-whois[sender="%(sender)s", dest="%(destemail)s", protocol="%(protocol)s", chain="%(chain)s"]
+action_mwl = %(action_)s
+            %(mta)s-whois-lines[sender="%(sender)s", dest="%(destemail)s", logpath="%(logpath)s", chain="%(chain)s"]
+action_xarf = %(action_)s
+            xarf-login-attack[service=%(__name__)s, sender="%(sender)s", logpath="%(logpath)s", port="%(port)s"]
+action_cf_mwl = cloudflare[cfuser="%(cfemail)s", cftoken="%(cfapikey)s"]
+            %(mta)s-whois-lines[sender="%(sender)s", dest="%(destemail)s", logpath="%(logpath)s", chain="%(chain)s"]
+action_blocklist_de  = blocklist_de[email="%(sender)s", service="%(__name__)s", apikey="%(blocklist_de_apikey)s", agent="%(fail2ban_agent)s"]
+action_abuseipdb = abuseipdb
+action = %(action_)s
+
+[sshd]
+# This jail is enabled (enabled by default on Debian, but we ensure it for clarity)
+enabled = true
+port    = ssh
+logpath = %(sshd_log)s
+backend = %(sshd_backend)s
+# We use UFW as firewall frontend, but this can safely be removed from the jail
+banaction = ufw
+
+[postfix]
+mode    = aggressive
+port    = smtp,465,submission
+logpath = %(postfix_log)s
+backend = %(postfix_backend)s
+
+[postfix-rbl]
+filter   = postfix[mode=rbl]
+port     = smtp,465,submission
+logpath  = %(postfix_log)s
+backend  = %(postfix_backend)s
+maxretry = 1
+
+[pam-generic]
+banaction = %(banaction_allports)s
+logpath  = %(syslog_authpriv)s
+backend  = %(syslog_backend)s
+
+[slapd]
+port    = ldap,ldaps
+logpath = /var/log/slapd.log
+EOF
+
+   cat <<EOF >/etc/fail2ban/filter.d/fwdrop.local
+################################################################################
+# Default /etc/fail2ban/filter.d/fwdrop.local
+# When using the systemd backend to improve performance,
+# configure a filter with journalmatch.
+# For example, to parse only kernel-level log messages
+#
+# By ${ComanyName}
+# For ${PRETTY_NAME}
+################################################################################
+
+# See: https://man.archlinux.org/man/systemd.journal-fields.7
+[Definition]
+failregex = ^.*DROP_.*SRC=<ADDR> DST=.*$
+journalmatch = _TRANSPORT=kernel
+EOF
+
+   echo -e "Security:\t\tEnable fail2ban"
+   systemctl enable --now fail2ban >/dev/null 2>&1
+fi
+
+###
+# Spring clean the system
+###
+echo -e "Misc:\t\tClear system logs (journald)"
+journalctl --sync >/dev/null 2>&1
+journalctl --vacuum-time=1s >/dev/null 2>&1
+rm -rfv /var/log/apt/* >/dev/null 2>&1
+rm -rfv /var/log/unattended-upgrades/* >/dev/null 2>&1
+rm -rfv /var/log/private/* >/dev/null 2>&1
+rm -rfv /var/log/runit/ssh/* >/dev/null 2>&1
+rm -rfv /run/log/journal/* >/dev/null 2>&1
+rm -rfv /var/log/journal/* >/dev/null 2>&1
+rm -rfv /var/log/alternatives.log >/dev/null 2>&1
+rm -rfv /var/log/dpkg.log >/dev/null 2>&1
+rm -rfv /var/log/sudo >/dev/null 2>&1
+rm -rfv /var/log/faillog >/dev/null 2>&1
+rm -rfv /var/log/lastlog >/dev/null 2>&1
+rm -rfv /var/log/btmp >/dev/null 2>&1
+rm -rfv /var/log/wtmp >/dev/null 2>&1
+rm -rfv /var/log/fail2ban.log >/dev/null 2>&1
+
+# And now we are done
+echo -e "Misc:\t\tDone customizing the ${PRETTY_NAME} installation"
+
+# Delete self (this script)
+rm -rf "${0}" >/dev/null 2>&1
+
+echo -e "Misc:\t\tReboot the system"
+systemctl start reboot.target >/dev/null 2>&1
