@@ -19,14 +19,33 @@ Even if all the security is curated carefully we can not guarantee that it will 
 - The password of `enadmin` user is: `Start1234`, and you should change this directly after the installation
   - You can change the user and/or the password in the `preseed.cfg` file
   - Please remember to change to `rc.local` if you change to username. Please see line 23 for this change.
-- The user `enadmin` can administer the freshly installed system and is allowed to login remotely (you must change the SSH keys!), and use `sudo`
-  - Please see Line 111 in the `rc.local` file. Look for `<PLACE YOU OWN KEYS HERE>`, this is where your SSH public keys should be placed
+- The user `enadmin` can administer the freshly installed system and is allowed to login remotely, and use `sudo`
+  - Please see Line 111 in the `rc.local` file. Look for `<PLACE YOU OWN KEYS HERE>`, this is where <u>your</u> SSH public keys must be placed
+  - Remote login (SSH) <u>requires</u> the usage of SSH public keys, login via password is not enabled!
 - The user `root` is disabled! Please keep this in mind!!!
 
-## Further reading CIS Security recommendation:
+### Bare Metal?
 
-- **Center for Internet Security**: [https://www.cisecurity.org/](https://www.cisecurity.org/)
-- **CIS recommendations**: [CIS Benchmarks](https://learn.cisecurity.org/benchmarks)
+If you use this to deploy a bare metal server, what is perfectly fine, you should remove all the Hyper-V parts in the `rc.local` file.
+
+### Other hypervisors?
+
+You can use any other hypervisor! But you should remove the Hyper-V parts and should apply any recommended tools manually.
+
+### Containers?
+
+This is not meant to be used in any container environment, e.g., Docker!!!
+
+### WSL?
+
+Can you use this with WSL/WSL2? The simple answer is: **NO**!
+
+The long answer: You can remove all the Grub related stuff and apply the `rc.local` to your Debian WSL container. But in our opinion, you should also remove the SSH parts.
+
+### Further reading CIS Security recommendation:
+
+- Center for Internet Security: [https://www.cisecurity.org/](https://www.cisecurity.org/)
+- CIS recommendations: [CIS Benchmarks](https://learn.cisecurity.org/benchmarks)
 
 ## Found a bug or Issue?
 
