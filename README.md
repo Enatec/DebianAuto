@@ -25,6 +25,131 @@ Or even better: Fork the Repository, fix it and submit a [pull request](https://
 
 See the [Contribution Guide](CONTRIBUTING.md) for more details!
 
+## Create an ISO Image
+
+```bash
+#!/usr/bin/env bash
+###
+# This script will create a new ISO with the preseed.cfg file and the rc.local script
+# The rc.local script will be executed at the end of the installation
+#
+# All commands are fully qualified to ensure the script can be run from anywhere and no aliases are used
+# This script is designed to be run from the Windows Subsystem for Linux (WSL) on Windows 11
+# Many of the commands are run with sudo, so you will need to ensure you have sudo access on your WSL
+# You will also need to ensure you have the required packages installed (genisoimage and syslinux-utils)
+###
+
+# This should be the name of the ISO you want to use as a base (this is the Debian 10.4.0 netinst ISO)
+isoIn=debian-12.4.0-amd64-netinst.iso
+# This is the name of the new ISO that will be created
+isoOut=preseed-${isoIn}
+# This is the source directory where the files are located
+SourceDirectory='/mnt/c/DEV/DebianAuto'
+# This is the target directory where the files will be copied to
+TargetDirectory='/home/enadmin/DebianAuto'
+
+# Ensure we have the required packages
+/usr/bin/sudo /usr/bin/apt install genisoimage syslinux-utils -y >/dev/null 2>&1
+# Clean-up existing ISO in the source directory
+/usr/bin/sudo /usr/bin/rm -f $SourceDirectory/$isoOut >/dev/null 2>&1
+# Clean-up target directory
+/usr/bin/sudo /usr/bin/rm -rf $TargetDirectory >/dev/null 2>&1
+# Copy files to target directory
+/usr/bin/cp -rT $SourceDirectory $TargetDirectory
+# Goto target directory
+pushd $TargetDirectory >/dev/null 2>&1
+# Check if the ISO exists in the target directory
+if [ -f $isoIn ]; then
+   # Check if we need to remove the old ISO
+   if [ -f $isoOut ]; then
+      # Remove the old ISO
+      /usr/bin/sudo /usr/bin/rm -f $isoOut
+   fi
+   # Remove any old directories
+   /usr/bin/sudo /usr/bin/rm -rf new-iso vanilla-iso >/dev/null 2>&1
+   # Create new directories
+   /usr/bin/mkdir -p vanilla-iso new-iso >/dev/null 2>&1
+   # Mount the ISO
+   /usr/bin/sudo /usr/bin/mount -o loop $isoIn vanilla-iso >/dev/null 2>&1
+   # Copy the ISO contents to the new directory
+   /usr/bin/cp -rT vanilla-iso/ new-iso/
+   # Unmount the ISO
+   /usr/bin/sudo /usr/bin/umount vanilla-iso >/dev/null 2>&1
+   # Goto the Jumpstart directory
+   pushd Jumpstart/ >/dev/null 2>&1
+   if [ -f ../debian.tar.gz ]; then
+      # Remove the old tarball
+      /usr/bin/sudo /usr/bin/rm -f ../debian.tar.gz >/dev/null 2>&1
+   fi
+   # Change permissions on rc.local
+   /usr/bin/chmod 700 ./rc.local >/dev/null 2>&1
+   # Create the tarball
+   /usr/bin/tar -czf ../debian.tar.gz . >/dev/null 2>&1
+   # Return to the target directory
+   popd >/dev/null 2>&1
+   # Copy the tarball and preseed.cfg to the new ISO
+   /usr/bin/cp debian.tar.gz new-iso/
+   /usr/bin/cp preseed.cfg new-iso/
+   # Change permissions on the preseed.cfg
+   /usr/bin/chmod 644 new-iso/isolinux/adtxt.cfg
+   # Add the preseed.cfg entry to the boot menu
+   /usr/bin/cat >> new-iso/isolinux/adtxt.cfg <<EOF
+label auto-wipe
+menu label ^Automatic - DESTRUCTIVE
+kernel /install.amd/vmlinuz
+append auto=true priority=critical vga=788 file=/cdrom/preseed.cfg initrd=/install.amd/initrd.gz --- quiet
+EOF
+   # Change permissions on the preseed.cfg
+   /usr/bin/chmod 444 new-iso/isolinux/adtxt.cfg
+   # Change to the new ISO directory
+   pushd new-iso/ >/dev/null 2>&1
+   # allow write access to the md5sum.txt file
+   /usr/bin/chmod +w md5sum.txt >/dev/null 2>&1
+   # Generate the new md5sum.txt file
+   /usr/bin/find -follow -type f ! -name md5sum.txt -print0 2>/dev/null | /usr/bin/xargs -0 md5sum > md5sum.txt
+   # remove write access to the md5sum.txt file
+   /usr/bin/chmod -w md5sum.txt >/dev/null 2>&1
+   # Go back to the target directory
+   popd >/dev/null 2>&1
+   # Create the new ISO
+   /usr/bin/sudo /usr/bin/genisoimage -r -J -b isolinux/isolinux.bin -c isolinux/boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table -o $isoOut new-iso >/dev/null 2>&1
+   # Optional, if you want to make the ISO hybrid (USB bootable) for VM testing
+   /usr/bin/sudo /usr/bin/isohybrid $isoOut >/dev/null 2>&1
+   # Remove the temporary directories
+   /usr/bin/sudo /usr/bin/rm -rf new-iso vanilla-iso >/dev/null 2>&1
+   # Remove the tarball
+   /usr/bin/sudo /usr/bin/rm -f debian.tar.gz >/dev/null 2>&1
+   # Copy the ISO to the source directory
+   /usr/bin/sudo /usr/bin/cp -rf $isoOut $SourceDirectory
+   # Change ownership and permission of the ISO
+   /usr/bin/sudo /usr/bin/chown enadmin:enadmin $SourceDirectory/$isoOut
+   /usr/bin/sudo chmod 644 $SourceDirectory/$isoOut
+else
+   # Whoops, we can't find the ISO
+   echo "Unable to find $isoIn"
+fi
+
+# Return to where we started
+popd >/dev/null 2>&1
+# Remove the target directory (Clean-up)
+/usr/bin/sudo /usr/bin/rm -rf $TargetDirectory >/dev/null 2>&1
+```
+
+Please check and review all the values, before just start the script!
+
+### Requirements
+
+- `debian-12.4.0-amd64-netinst.iso` (can be [downloaded](https://www.debian.org/download) from the Debian project)
+- The files of this repository
+- A Linux based system (We use Debian 12 as WSL2 Image)
+- All required packages will be downloaded (if required)
+
+### Alternatives
+
+You can also deploy the `preseed.cfg` via a Server, e.g., Web-Server or File-Share. As long as the system can reach it during the installation.
+
+In addition, you can change the `preseed.cfg` file (and the very end) to download the Jumstart file from the same location where the `preseed.cfg` itself is found, or any other location the system can reach. It is not required to build your own ISO or put the Jumpstart file on the install media.
+
 ## Contribution
 
 **More then welcome!**
