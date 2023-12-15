@@ -20,7 +20,7 @@ Even if all the security is curated carefully we can not guarantee that it will 
   - You can change the user and/or the password in the `preseed.cfg` file
   - Please remember to change to `rc.local` if you change to username. Please see line 23 for this change.
 - The user `enadmin` can administer the freshly installed system and is allowed to login remotely (you must change the SSH keys!), and use `sudo`
-  - Please see Line 111 in the `rc.local` file, this is where you need to place your own SSH public key
+  - Please see Line 111 in the `rc.local` file. Look for `<PLACE YOU OWN KEYS HERE>`, this is where your SSH public keys should be placed
 - The user `root` is disabled! Please keep this in mind!!!
 
 ## Further reading CIS Security recommendation:
