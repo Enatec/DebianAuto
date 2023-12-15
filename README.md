@@ -5,9 +5,9 @@ Automated Debian 12 installation
 
 ## Found a bug or Issue?
 
-If you find something bad (like a bug, error, or any issue), please report it here by open an [Issue](https://github.com/Enatec/MicrosoftEndpointManager/issues).
+If you find something bad (like a bug, error, or any issue), please report it here by open an [Issue](https://github.com/Enatec/DebianAuto/issues).
 
-Or even better: Fork the Repository, fix it and submit a [pull request](https://github.com/Enatec/MicrosoftEndpointManager/pulls), so others can participate too!
+Or even better: Fork the Repository, fix it and submit a [pull request](https://github.com/Enatec/DebianAuto/pulls), so others can participate too!
 
 See the [Contribution Guide](CONTRIBUTING.md) for more details!
 
