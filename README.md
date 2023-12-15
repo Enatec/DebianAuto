@@ -2,6 +2,20 @@
 
 Automated Debian 12 installation
 
+Ain was to create a slim and secure base image. Mostly used for virtual hosts in an Hyper-V enviroment.
+
+Most of the security and hardening related work is based on the work of [jhochwald (Joerg Hochwald)](https://github.com/jhochwald/) and [Mokkujin (Chris)](https://github.com/Mokkujin/).
+
+Most of the [cisecurity.org](https://www.cisecurity.org/) requirements should be matched!
+
+You can apply the rc.local file to any Debian, or Debian based system. It is meant to help the system administrator built a secure environment. This fille works best for a newly installed system!
+
+Even if all the security is curated carefully we can not guarantee that it will work for you. It will not magically secure any random excisting host. That said, it might be a good starting point to built a secure system/environment.
+
+## Further reading CIS Security recommendation:
+
+- **Center for Internet Security**: [https://www.cisecurity.org/](https://www.cisecurity.org/)
+- **CIS recommendations**: [CIS Benchmarks](https://learn.cisecurity.org/benchmarks)
 
 ## Found a bug or Issue?
 
