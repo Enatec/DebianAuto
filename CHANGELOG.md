@@ -4,6 +4,64 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Common Changelog](https://common-changelog.org/).
 
+## 1.2.0.35 - 2023-12-15
+
+### Added
+
+- Ensure no world writable files exist
+- Ensure sticky bit is set on all world-writable directories (Security/Hardening)
+- Ensure no unowned files or directories exist
+- Ensure no ungrouped files or directories exist
+
+## 1.2.0.34 - 2023-12-15
+
+### Added
+
+- Disable `Automounting` Service (Security/Hardening)
+- Disable `USB storage`
+- Ensure `openbsd-inetd` and `netutils-inetd` are removed
+- Ensure the X Window system is not installed
+- Ensure Avahi Server is not installed
+- Ensure CUPS is not installed
+- Ensure NFS and RPC are not installed
+- Ensure Domain Name System (dns) server is not installed
+- Ensure File Transfer Protocol (ftp) is not installed
+- Ensure HTTP server is not enabled
+- Ensure IMAP and POP servers are not installed
+- Ensure Samba is not installed or enabled
+- Ensure HTTP-proxy is not installed
+- Ensure SNMP server is not installed
+- Ensure telnet server is not installed
+- Ensure rsync service is not enabled
+- Ensure NIS Server is not installed
+- Ensure rsh client is not installed
+- Ensure talk client is not installed
+- Ensure telnet client is not installed
+- Ensure LDAP client is not installed
+- Ensure IPv6 forwarding is disabled (Add net.ipv6.conf.all.forwarding)
+- Ensure IPv6 router advertisements are not accepted
+- Ensure system is disabled when audit logs are full
+- Ensure audit_backlog_limit is sufficient
+- Ensure audit logs are not automatically deleted
+- Ensure rsyslog is installed and running
+- Ensure journald is configured to send logs to syslog
+- Ensure journald is configured to compress large files
+- Ensure journald is configured to write logfiles to persistent disk
+- Ensure cron daemon is enabled
+- Ensure password expiration warning days is 7 or more
+- Install TCP wrappers for simple access list management and standardized logging method for services
+
+### Changed
+
+- Ensure permissions and ownership on cron is configured
+- /etc/cron.deny is changed to 600 (locked down further)
+- **Breaking:** Ensure only strong MAC algorithms are used (might cause issues with older ssh clients)
+- **Breaking:** Ensure only strong Key Exchange algorithms are used (might cause issues with older ssh clients)
+- Ensure SSH Idle Timeout Interval is configured
+- Ensure SSH LoginGraceTime is set to one minute or less
+- Ensure minimum days between password changes is 7 or more
+- Ensure permissions on /etc/gshadow- are configured (Was 600 is 640)
+
 ## 1.2.0.33 - 2023-12-15
 
 ### Added

@@ -4,7 +4,7 @@
 # Bootstrap configure of a fresh Debian 12 system after installation.
 # This file is saved as /etc/rc.local and is executed on the first boot.
 #
-# Version:  1.2.0.33
+# Version:  1.2.0.35
 # Date:     2023/12/15
 # Authors:  Joerg Hochwald @jhochwald (Maintainer)
 #           Chris Pope @Mokkujin (Contributor)
@@ -278,6 +278,10 @@ for disable in ${FS}; do
    fi
 done
 
+echo -e "Security:\t\tDisable USB storage"
+MODULE_NAME="usb-storage"
+echo "install ${MODULE_NAME} /bin/true" >>/etc/modprobe.d/blacklist.conf
+
 if [ -f /etc/systemd/system.conf ]; then
    echo -e "Security:\t\tModify /etc/systemd/system.conf"
    sed -i 's/^#DumpCore=.*/DumpCore=no/' /etc/systemd/system.conf
@@ -394,6 +398,21 @@ echo -e "Security:\t\tRegister /sbin/nologin and /usr/sbin/nologin"
 echo "/sbin/nologin" >>/etc/shells
 echo "/usr/sbin/nologin" >>/etc/shells
 
+echo -e "Security:\t\tEnsure audit log is configured"
+if [ ! -d "/etc/audit/" ]; then
+   mkdir -p /etc/audit/ >/dev/null 2>&1
+fi
+
+echo -e "Security:\t\tEnsure system is disabled when audit logs are full"
+cat <<'EOF' >/etc/audit/auditd.conf
+status=audit
+OPTIONS='space_left_action=email action_mail_acct=root admin_space_left_action=halt'
+max_log_file=5
+max_log_file_action=keep_logs
+EOF
+chown root:root /etc/audit/auditd.conf >/dev/null 2>&1
+chmod 0600 /etc/audit/auditd.conf >/dev/null 2>&1
+
 echo -e "Security:\t\tDisable prelinking via /etc/sysconfig/prelink"
 if [ ! -d "/etc/sysconfig/" ]; then
    mkdir -p /etc/sysconfig/ >/dev/null 2>&1
@@ -453,7 +472,8 @@ chmod 644 /etc/hosts.deny >/dev/null 2>&1
 echo -e "Security:\t\tConfigure /etc/login.defs"
 sed -i 's/^.*LOG_OK_LOGINS.*/LOG_OK_LOGINS yes/' /etc/login.defs
 sed -i 's/^UMASK.*/UMASK 077/' /etc/login.defs
-sed -i 's/^PASS_MIN_DAYS.*/PASS_MIN_DAYS 1/' /etc/login.defs
+sed -i 's/^PASS_WARN_AGE.*/PASS_WARN_AGE 7/' /etc/login.defs
+sed -i 's/^PASS_MIN_DAYS.*/PASS_MIN_DAYS 7/' /etc/login.defs
 sed -i 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS 60/' /etc/login.defs
 sed -i 's/DEFAULT_HOME.*/DEFAULT_HOME no/' /etc/login.defs
 sed -i 's/ENCRYPT_METHOD.*/ENCRYPT_METHOD SHA512/' /etc/login.defs
@@ -640,6 +660,9 @@ fs.protected_hardlinks = 1
 fs.protected_symlinks = 1
 
 # IPv6 related (See above)
+net.ipv6.conf.all.accept_ra=0
+net.ipv6.conf.default.accept_ra=0
+net.ipv6.conf.all.forwarding = 0
 net.ipv6.conf.all.accept_redirects = 0
 net.ipv6.conf.all.accept_source_route = 0
 net.ipv6.conf.default.accept_redirects = 0
@@ -709,8 +732,94 @@ dpkg-statoverride --remove /bin/su >/dev/null 2>&1
 dpkg-statoverride --update --add root suusers 4750 /bin/su >/dev/null 2>&1
 
 echo -e "Security:\t\tPackage removal"
-PACKAGE_REMOVE="apport* autofs avahi* beep git pastebinit popularity-contest rsh* rsync talk* telnet* tftp* whoopsie xinetd yp-tools ypbind"
+PACKAGE_REMOVE="apport* autofs avahi* beep git pastebinit popularity-contest rsh* rsync talk* telnet* tftp* whoopsie xinetd yp-tools ypbind openbsd-inetd inetutils-inetd"
 apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure telnet server is not enabled"
+PACKAGE_REMOVE="telnetd inetutils-telnetd telnetd-ssl krb5-telnetd heimdal-servers"
+apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure the X Window system is not installed"
+PACKAGE_REMOVE="xserver-xorg-core xserver-xorg-core-dbg xserver-common xserver-xephyr xserver-xfbdev tightvncserver vnc4server fglrx-driver xvfb xserver-xorg-video-nvidia-legacy-173xx xserver-xorg-video-nvidia-legacy-96xx xnest"
+apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure Avahi Server is not enabled"
+PACKAGE_REMOVE="avahi-daemon libavahi-common-data libavahi-common3 libavahi-core7"
+apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure CUPS is not enabled"
+PACKAGE_REMOVE="libcups2 libcupscgi1 libcupsimage2 libcupsmime1 libcupsppdc1 cups-common cups-client cups-ppdc libcupsfilters1 cups-filters cups"
+apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure NFS and RPC are not enabled"
+PACKAGE_REMOVE="rpcbind nfs-kernel-server"
+apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure DNS Server is not enabled"
+PACKAGE_REMOVE="bind9 unbound"
+apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure File Transfer Protocol (ftp) is not enabled"
+PACKAGE_REMOVE="ftpd ftpd-ssl heimdal-servers inetutils-ftpd krb5-ftpd muddleftpd proftpd-basic pure-ftpd pure-ftpd-ldap pure-ftpd-mysql pure-ftpd-postgresql twoftpd-run vsftpd wzdftpd"
+apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure HTTP server is not enabled"
+PACKAGE_REMOVE="nginx apache2 lighttpd micro-httpd mini-httpd yaws boa bozohttpd"
+apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure IMAP and POP servers are not installed"
+PACKAGE_REMOVE="citadel-server courier-imap cyrus-imapd-2.4 dovecot-imapd mailutils-imap4d courier-pop cyrus-pop3d-2.4 dovecot-pop3d heimdal-servers mailutils-pop3d popa3d solid-pop3d xmail"
+apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure Samba is not enabled"
+PACKAGE_REMOVE="samba"
+apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+SERVICE_NAME="smbd"
+systemctl disable "$SERVICE_NAME" >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure HTTP-proxy is not enabled"
+PACKAGE_REMOVE="squid3 squid"
+apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure SNMP server is not enabled"
+PACKAGE_REMOVE="snmp"
+apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure NIS Server is not enabled"
+PACKAGE_REMOVE="nis"
+apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure rsh client is not installed"
+PACKAGE_REMOVE="rsh-client rsh-redone-client heimdal-clients"
+apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure talk client is not installed"
+PACKAGE_REMOVE="talk inetutils-talk"
+apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure telnet client is not installed"
+PACKAGE_REMOVE="telnet"
+apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure LDAP client is not installed"
+PACKAGE_REMOVE="ldap-utils"
+apt-get purge ${PACKAGE_REMOVE} -y >/dev/null 2>&1
+
+# Ensure we cleanup after ourselves
+apt-get autoremove -y >/dev/null 2>&1
+
+if [ -f "/etc/default/rsync" ]; then
+   echo -e "Security:\t\tEnsure rsync service is not enabled"
+   cat <<'EOF' >/etc/default/rsync
+RSYNC_ENABLE=false
+EOF
+   chown root:root /etc/default/rsync >/dev/null 2>&1
+   chmod 0600 /etc/default/rsync >/dev/null 2>&1
+fi
+
+echo -e "Security:\t\tDisable Automounting Service"
+SERVICE_NAME="autofs"
+update-rc.d "$SERVICE_NAME" remove >/dev/null 2>&1
 
 echo -e "Security:\t\tMore Secure Random Entropy Pool (WIP) - Install rng-tools"
 apt-get install rng-tools -y >/dev/null
@@ -887,7 +996,7 @@ PermitRootLogin no
 MaxAuthTries 5
 
 # Reduced login grace period, which is the amount of time a user has to complete authentication after initially connecting
-LoginGraceTime 90
+LoginGraceTime 60
 
 # Disable password based login
 AuthenticationMethods publickey
@@ -908,14 +1017,20 @@ PermitUserEnvironment no
 AllowAgentForwarding no
 AllowTcpForwarding no
 PermitTunnel no
+AllowStreamLocalForwarding no
+PermitUserRC no
 
 #
 UseDNS no
+
+# Checking rekey limit for time (6 hours) or volume (512Mio) whichever comes first (Legacy)
+#RekeyLimit 512M 6h
 
 # Public key authentication first
 ChallengeResponseAuthentication no
 KerberosAuthentication no
 GSSAPIAuthentication no
+GSSAPIKeyExchange no
 
 # Limit ssh access to only ${AdminUser} user
 AllowUsers ${AdminUser}
@@ -942,19 +1057,19 @@ IgnoreRhosts yes
 HostbasedAuthentication no
 
 # Specifies the available KEX (Key Exchange) algorithms.
-KexAlgorithms curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256
+KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group14-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256
 
 # Specifies the ciphers allowed
 Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
 
 #Specifies the available MAC (message authentication code) algorithms
-MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-512,hmac-sha2-256,umac-128@openssh.com
+MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256
 
 # LogLevel VERBOSE logs user's key fingerprint on login. Needed to have a clear audit track of which key was using to log in.
 LogLevel VERBOSE
 
-ClientAliveCountMax 3
-ClientAliveInterval 600
+ClientAliveCountMax 0
+ClientAliveInterval 300
 GatewayPorts no
 GSSAPICleanupCredentials yes
 IgnoreUserKnownHosts yes
@@ -1115,7 +1230,7 @@ chmod 600 /etc/group- >/dev/null 2>&1
 
 echo -e "Security:\t\tEnsure permissions on /etc/gshadow- are configured"
 chown root:root /etc/gshadow- >/dev/null 2>&1
-chmod 600 /etc/gshadow- >/dev/null 2>&1
+chmod 640 /etc/gshadow- >/dev/null 2>&1
 
 echo -e "Security:\t\tEnsure no users have .netrc files"
 for dir in $(cat /etc/passwd | awk -F: '{ print $6 }'); do
@@ -1517,6 +1632,11 @@ echo "GRUB_CMDLINE_LINUX=\"\$GRUB_CMDLINE_LINUX audit=1\"" >/etc/default/grub.d/
 chown root:root /etc/default/grub.d/10_enableaudit.cfg >/dev/null 2>&1
 chmod 0640 /etc/default/grub.d/10_enableaudit.cfg >/dev/null 2>&1
 
+echo -e "Security:\t\tEnsure audit_backlog_limit is sufficient. [Grub]"
+echo "GRUB_CMDLINE_LINUX=\"\$GRUB_CMDLINE_LINUX audit_backlog_limit=1\"" >/etc/default/grub.d/10_enableauditbackloglimit.cfg
+chown root:root /etc/default/grub.d/10_enableauditbackloglimit.cfg >/dev/null 2>&1
+chmod 0640 /etc/default/grub.d/10_enableauditbackloglimit.cfg >/dev/null 2>&1
+
 grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1
 
 echo -e "Security:\t\tConfigure sudo"
@@ -1611,19 +1731,19 @@ echo -e "Security:\t\tEnforce File Permissions"
 if [ -f /etc/cron.allow ]; then
    echo -e "Security:\t\tLockdown /etc/cron.allow"
    chown root:root /etc/cron.allow >/dev/null 2>&1
-   chmod 0644 /etc/cron.allow >/dev/null 2>&1
+   chmod 0600 /etc/cron.allow >/dev/null 2>&1
 fi
 
 if [ -f /etc/cron.deny ]; then
    echo -e "Security:\t\tLockdown /etc/cron.deny"
    chown root:root /etc/cron.deny >/dev/null 2>&1
-   chmod 0644 /etc/cron.deny >/dev/null 2>&1
+   chmod 0600 /etc/cron.deny >/dev/null 2>&1
 fi
 
 if [ -f /etc/at.allow ]; then
    echo -e "Security:\t\tLockdown /etc/at.allow"
    chown root:root /etc/at.allow >/dev/null 2>&1
-   chmod 0644 /etc/at.allow >/dev/null 2>&1
+   chmod 0600 /etc/at.allow >/dev/null 2>&1
 fi
 
 if [ -f /etc/at.deny ]; then
@@ -1634,36 +1754,43 @@ fi
 
 if [ -f /etc/crontab ]; then
    echo -e "Security:\t\tLockdown /etc/crontab"
+   chown root:root /etc/crontab >/dev/null 2>&1
    chmod 600 /etc/crontab >/dev/null 2>&1
 fi
 
 if [ -f /etc/shadow ]; then
    echo -e "Security:\t\tLockdown /etc/shadow"
+   chown root:root /etc/shadow >/dev/null 2>&1
    chmod 640 /etc/shadow >/dev/null 2>&1
 fi
 
 if [ -d /etc/cron.d ]; then
    echo -e "Security:\t\tLockdown /etc/cron.d"
+   chown root:root /etc/cron.d >/dev/null 2>&1
    chmod 700 /etc/cron.d >/dev/null 2>&1
 fi
 
 if [ -d /etc/cron.daily ]; then
    echo -e "Security:\t\tLockdown /etc/cron.daily"
+   chown root:root /etc/cron.daily >/dev/null 2>&1
    chmod 700 /etc/cron.daily >/dev/null 2>&1
 fi
 
 if [ -d /etc/cron.hourly ]; then
    echo -e "Security:\t\tLockdown /etc/cron.hourly"
+   chown root:root /etc/cron.hourly >/dev/null 2>&1
    chmod 700 /etc/cron.hourly >/dev/null 2>&1
 fi
 
 if [ -d /etc/cron.weekly ]; then
    echo -e "Security:\t\tLockdown /etc/cron.weekly"
+   chown root:root /etc/cron.weekly >/dev/null 2>&1
    chmod 700 /etc/cron.weekly >/dev/null 2>&1
 fi
 
 if [ -d /etc/cron.monthly ]; then
    echo -e "Security:\t\tLockdown /etc/cron.monthly"
+   chown root:root /etc/cron.monthly >/dev/null 2>&1
    chmod 700 /etc/cron.monthly >/dev/null 2>&1
 fi
 
@@ -1796,12 +1923,41 @@ sed -i -r -e "s/^(password\s+requisite\s+pam_pwquality.so)(.*)$/# \1\2         #
 sed -i "s/yescrypt/sha512/g" /etc/pam.d/common-password
 
 echo -e "Security:\t\tPost processing"
-apt-get install fwupd secureboot-db -y >/dev/null 2>&1
+apt-get install fwupd rsyslog cron tcpd -y >/dev/null 2>&1
 update-grub >/dev/null 2>&1
 find /boot/ -type f -name '*.cfg' -exec chmod 0400 {} \;
 
+echo -e "Security:\t\tEnsure cron daemon is enabled"
+SERVICE_NAME="cron"
+update-rc.d "$SERVICE_NAME" remove >/dev/null 2>&1
+update-rc.d "$SERVICE_NAME" defaults >/dev/null 2>&1
+systemctl enable "$SERVICE_NAME" >/dev/null 2>&1
+systemctl restart "$SERVICE_NAME" >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure rsyslog service is enabled"
+SERVICE_NAME="rsyslog"
+update-rc.d "$SERVICE_NAME" remove >/dev/null 2>&1
+update-rc.d "$SERVICE_NAME" defaults >/dev/null 2>&1
+systemctl enable "$SERVICE_NAME" >/dev/null 2>&1
+systemctl restart "$SERVICE_NAME" >/dev/null 2>&1
+
+chown root:root /etc/rsyslog.conf >/dev/null 2>&1
+chmod 0640 /etc/rsyslog.conf >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure rsyslog service is running"
+systemctl restart rsyslog >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure journald is configured to send logs to syslog"
+sed -i 's/^#ForwardToSyslog=.*/ForwardToSyslog=yes/' /etc/systemd/journald.conf
+
+echo -e "Security:\t\tEnsure journald is configured to compress large files"
+sed -i 's/^#Compress=.*/Compress=yes/' /etc/systemd/journald.conf
+
+echo -e "Security:\t\tEnsure journald is configured to write logfiles to persistent disk"
+sed -i 's/^#Storage=.*/Storage=persistent/' /etc/systemd/journald.conf
+
 echo -e "Security:\t\tCleanup Group memberships"
-CleanupGroups="loppy cdrom audio dip video plugdev netdev bluetooth"
+CleanupGroups="floppy cdrom audio dip video plugdev netdev bluetooth"
 for CleanupGroup in ${CleanupGroups}; do
    gpasswd -d ${AdminUser} ${CleanupGroup} >/dev/null 2>&1
 done
@@ -1819,6 +1975,20 @@ WheelUsers="root ${AdminUser}"
 for WheelUser in ${WheelUsers}; do
    usermod -a -G wheel ${WheelUser} >/dev/null 2>&1
 done
+
+echo -e "Security:\t\tEnsure no world writable files exist"
+df --local -P | awk '{if (NR!=1) print $6}' | xargs -I '{}' find '{}' -xdev -ignore_readdir_race -type f -perm -0002 -print 2>/dev/null | xargs chmod o-w >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure sticky bit is set on all world-writable directories"
+df --local -P | awk '{if (NR!=1) print $6}' | xargs -I '{}' find '{}' -xdev -ignore_readdir_race -type d \( -perm -0002 -a ! -perm -1000 \) -print 2>/dev/null
+
+echo -e "Security:\t\tEnsure no unowned files or directories exist"
+USER='root'
+df --local -P | awk '{if (NR!=1) print $6}' | xargs -I '{}' find '{}' -xdev -ignore_readdir_race -nouser -print 2>/dev/null | xargs chown "$USER" >/dev/null 2>&1
+
+echo -e "Security:\t\tEnsure no ungrouped files or directories exist"
+GROUP='root'
+df --local -P | awk '{if (NR!=1) print $6}' | xargs -I '{}' find '{}' -xdev -ignore_readdir_race -nogroup -print 2>/dev/null | xargs chgrp "$GROUP" >/dev/null 2>&1
 
 ###
 # Install the Microsoft Debian Repository
@@ -3360,6 +3530,9 @@ EOF
    echo -e "Security:\t\tEnable fail2ban"
    systemctl enable --now fail2ban >/dev/null 2>&1
 fi
+
+echo -e "Security:\t\tEnsure updates, patches and additional security software are installed (One final time)"
+DEBIAN_FRONTEND='noninteractive' apt-get -o Dpkg::Options::='--force-confdef' -o Dpkg::Options::='--force-confold' upgrade -y >/dev/null 2>&1
 
 ###
 # Spring clean the system
