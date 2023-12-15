@@ -12,6 +12,17 @@ You can apply the rc.local file to any Debian, or Debian based system. It is mea
 
 Even if all the security is curated carefully we can not guarantee that it will work for you. It will not magically secure any random excisting host. That said, it might be a good starting point to built a secure system/environment.
 
+## What it does
+
+- It will install a slim Debian 12 server system
+- It will create a default User with the name `enadmin`
+- The password of `enadmin` user is: `Start1234`, and you should change this directly after the installation
+  - You can change the user and/or the password in the `preseed.cfg` file
+  - Please remember to change to `rc.local` if you change to username. Please see line 23 for this change.
+- The user `enadmin` can administer the freshly installed system and is allowed to login remotely (you must change the SSH keys!), and use `sudo`
+  - Please see Line 111 in the `rc.local` file, this is where you need to place your own SSH public key
+- The user `root` is disabled! Please keep this in mind!!!
+
 ## Further reading CIS Security recommendation:
 
 - **Center for Internet Security**: [https://www.cisecurity.org/](https://www.cisecurity.org/)
