@@ -27,7 +27,7 @@ See the [Contribution Guide](CONTRIBUTING.md) for more details!
 
 ## Create an ISO Image
 
-```bash
+```shell
 #!/usr/bin/env bash
 ###
 # This script will create a new ISO with the preseed.cfg file and the rc.local script
