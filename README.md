@@ -6,7 +6,7 @@ Ain was to create a slim and secure base image. Mostly used for virtual hosts in
 
 Most of the security and hardening related work is based on the work of [jhochwald (Joerg Hochwald)](https://github.com/jhochwald/) and [Mokkujin (Chris)](https://github.com/Mokkujin/).
 
-Many of the [cisecurity.org](https://www.cisecurity.org/) requirements should be matched!
+Many of the [cisecurity.org](https://www.cisecurity.org/) requirements and recommendations should be matched!
 
 You can apply the rc.local file to any Debian, or Debian based system. It is meant to help the system administrator built a secure environment. This fille works best for a newly installed system!
 
